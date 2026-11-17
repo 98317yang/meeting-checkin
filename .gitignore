@@ -1,0 +1,21 @@
+# .NET build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+
+# Local settings and secrets (never commit)
+appsettings.Development.json
+appsettings.Local.json
+*.secrets.json
+.env
+.env.*
+!.env.example
+
+# OS / Office temp files
+.DS_Store
+Thumbs.db
+~$*
