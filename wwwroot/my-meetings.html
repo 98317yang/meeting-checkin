@@ -1,0 +1,96 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>我的會議</title><link rel="stylesheet" href="app.css?v=20261118-ui1"></head><body><div id="shell"></div><main class="main"><div class="page-title"><h1>我的會議</h1><p>我發起或擔任主持人的會議。即將舉行的依時間由近到遠排列，每頁最多 20 筆。</p></div><section class="panel"><div class="filters"><div class="field wide"><label>會議名稱</label><input id="keyword" placeholder="輸入關鍵字"></div><div class="field"><label>開始日期</label><input id="from" type="date"></div><div class="field"><label>結束日期</label><input id="to" type="date"></div><button class="btn btn-primary" id="search">查詢</button></div></section><div class="meeting-tabs" id="tabs" role="tablist" style="display:flex;gap:8px;margin:18px 0 6px">
+<button type="button" class="btn btn-primary" role="tab" data-tab="upcoming" aria-selected="true">即將舉行 <span data-count="upcoming"></span></button>
+<button type="button" class="btn btn-light" role="tab" data-tab="ended" aria-selected="false">已結束 <span data-count="ended"></span></button>
+</div>
+<div id="list" class="meeting-list"></div><div class="pagination" id="pagination"></div></main><script src="app.js?v=20261118-ui1"></script><script>
+initShell();
+const flash=sessionStorage.getItem('meetingFlash');
+if(flash){sessionStorage.removeItem('meetingFlash');setTimeout(()=>notifySuccess(flash),100)}
+
+const pageSize=20;
+let allMeetings=[];
+let currentTab='upcoming';
+let currentPage=1;
+const startKey=m=>String(m.startDateTime||`${m.date}T${m.start}`);
+function tabMeetings(tab){
+  return tab==='ended'
+    ?allMeetings.filter(m=>meetingAccessState(m)==='closed').sort((a,b)=>startKey(b).localeCompare(startKey(a)))
+    :allMeetings.filter(m=>meetingAccessState(m)!=='closed').sort((a,b)=>startKey(a).localeCompare(startKey(b)));
+}
+function renderTabs(){
+  tabs.querySelectorAll('[data-tab]').forEach(b=>{const on=b.dataset.tab===currentTab;b.className=`btn ${on?'btn-primary':'btn-light'}`;b.setAttribute('aria-selected',String(on))});
+  tabs.querySelectorAll('[data-count]').forEach(s=>{s.textContent=`(${tabMeetings(s.dataset.count).length})`});
+}
+tabs.addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(!b)return;currentTab=b.dataset.tab;currentPage=1;renderPage()});
+
+function renderPagination(){
+  const rows=tabMeetings(currentTab);
+  const totalPages=Math.max(1,Math.ceil(rows.length/pageSize));
+  if(currentPage>totalPages)currentPage=totalPages;
+  pagination.innerHTML=rows.length>pageSize
+    ?Array.from({length:totalPages},(_,i)=>`<button type="button" class="${i+1===currentPage?'active':''}" data-page="${i+1}">${i+1}</button>`).join('')
+    :'';
+}
+
+function renderPage(){
+  renderTabs();
+  renderPagination();
+  const start=(currentPage-1)*pageSize;
+  const pageRows=tabMeetings(currentTab).slice(start,start+pageSize);
+  const filtered=!!(keyword.value.trim()||from.value||to.value);
+  list.innerHTML=pageRows.map(m=>meetingCard(m,'mine')).join('')||(filtered
+    ?'<div class="panel empty-state"><p>沒有符合查詢條件的會議。</p></div>'
+    :(currentTab==='ended'?'<div class="panel empty-state"><p>還沒有已結束的會議。</p></div>':'<div class="panel empty-state"><p>目前沒有即將舉行的會議。</p><a class="btn btn-primary" href="create-meeting.html">發起會議</a></div>'));
+}
+
+async function render(){
+  setPageBusy(true,'正在載入會議…');
+  try{
+    const uid=currentUserID();
+    const q=new URLSearchParams({userId:uid});
+    if(keyword.value.trim())q.set('keyword',keyword.value.trim());
+    if(from.value)q.set('startDate',from.value);
+    if(to.value)q.set('endDate',to.value);
+    allMeetings=await apiJson('api/meetings?'+q);
+    currentPage=1;
+    renderPage();
+  }catch(e){
+    allMeetings=[];
+    list.innerHTML=`<div class="panel">${esc(e.message)}</div>`;
+    pagination.innerHTML='';
+  }finally{
+    setPageBusy(false);
+  }
+}
+
+pagination.addEventListener('click',e=>{
+  const button=e.target.closest('[data-page]');
+  if(!button)return;
+  currentPage=Number(button.dataset.page)||1;
+  renderPage();
+  window.scrollTo({top:0,behavior:'smooth'});
+});
+
+list.addEventListener('click',async e=>{
+  const button=e.target.closest('[data-delete-meeting]');
+  if(!button)return;
+  e.preventDefault();
+  const meetingNo=button.dataset.deleteMeeting;
+  const name=button.dataset.deleteName||meetingNo;
+  const ok=await showConfirm(`確定要刪除「${name}」嗎？`,`刪除後無法復原。`,{confirmText:'確定刪除',cancelText:'取消'});
+  if(!ok)return;
+  button.disabled=true;
+  try{
+    await apiJson(`api/meetings/${encodeURIComponent(meetingNo)}?userId=${encodeURIComponent(currentUserID())}`,{method:'DELETE'});
+    allMeetings=allMeetings.filter(m=>String(m.id)!==String(meetingNo));
+    renderPage();
+    await showDialog('會議已刪除',{type:'success'});
+  }catch(err){
+    button.disabled=false;
+    notifyError(err.message);
+  }
+});
+
+search.onclick=render;
+render();
+</script></body></html>

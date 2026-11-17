@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#b51f2a">
+  <title>會議入口｜會議簽到系統</title>
+  <link rel="stylesheet" href="app.css?v=20261118-ui1">
+</head>
+<body class="mobile-page">
+  <main class="mobile-shell compact-mobile-shell">
+    <header class="mobile-topbar">
+      <img src="assets/logo.svg" alt="示範醫院">
+      <span>會議簽到系統</span>
+    </header>
+    <section id="liffContent" aria-live="polite">
+      <div class="mobile-loading">正在載入會議資料…</div>
+    </section>
+  </main>
+  <script>
+    const content=document.getElementById('liffContent');
+    const escText=value=>String(value??'').replace(/[&<>'"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+    function showError(message,code=''){
+      const blocked=['ACCOUNT_NOT_LINKED','NOT_INVITED'].includes(String(code||'').trim());
+      const title=blocked?'無法參與會議':'無法開啟會議';
+      const detail=blocked?'本會議不允許非指定名單人員加入。':message;
+      content.innerHTML=`<section class="mobile-error"><h1>${escText(title)}</h1><p>${escText(detail)}</p><button id="closeEntry" class="btn btn-primary" type="button">返回</button></section>`;
+      document.getElementById('closeEntry').onclick=()=>history.back();
+    }
+    async function readJson(response){
+      const text=await response.text();let data={};
+      try{data=text?JSON.parse(text):{}}catch{data={message:text}}
+      if(!response.ok){
+        const error=new Error(data.message||'系統處理失敗');
+        error.code=data.code||'';
+        throw error;
+      }
+      return data;
+    }
+    async function start(){
+      try{
+        const params=new URLSearchParams(location.search);
+        const type=params.get('type')||'meeting';
+        const token=(params.get('token')||'').trim();
+        const userId=(params.get('userId')||'').trim();
+        if(type!=='meeting'||!token)throw new Error('QR Code 缺少會議識別資料。');
+        if(!userId)throw new Error('缺少 LINE UserID，請由 LINE 重新進入會議。');
+
+        const result=await fetch('api/liff/meeting/authorize',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({type,meetingToken:token,userId})
+        }).then(readJson);
+
+        sessionStorage.removeItem('meetingLoginUser');
+        sessionStorage.removeItem('meetingLiffMeeting');
+        sessionStorage.removeItem('meetingMobileSession');
+        if(!result.mobileSession)throw new Error('無法建立會議登入狀態，請重新掃描 QR Code。');
+
+        sessionStorage.setItem('meetingLoginUser',JSON.stringify(result.user));
+        sessionStorage.setItem('meetingLiffMeeting',JSON.stringify({...result.meeting,meetingToken:token}));
+        sessionStorage.setItem('meetingMobileSession',result.mobileSession);
+        location.replace(`mobile-checkin.html?token=${encodeURIComponent(token)}&source=liff`);
+      }catch(error){showError(error.message||'無法開啟會議',error.code||'')}
+    }
+    start();
+  </script>
+</body>
+</html>

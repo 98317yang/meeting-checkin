@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>會議簽到名單</title>
+  <link rel="stylesheet" href="app.css?v=20261118-ui1">
+  <style>
+    .app-main{width:min(1600px,calc(100% - 28px));margin:22px auto 44px}
+    .attendance-report{background:#fff;padding:24px;border-radius:16px;font-family:"Microsoft JhengHei","Noto Sans TC",Arial,sans-serif;overflow:hidden}
+    .report-heading{text-align:center;margin-bottom:14px}
+    .report-heading h1,.report-heading h2,.report-heading h3{margin:3px 0}
+    .hospital-full-name{font-size:1.35rem;font-weight:800;line-height:1.3}
+    .report-heading h1{font-size:2rem;line-height:1.2}
+    .report-heading h3{font-size:1.55rem;line-height:1.2}
+    .report-info{display:flex;align-items:center;justify-content:space-between;gap:28px;margin:14px 0;font-size:.95rem;white-space:nowrap}.report-info>div{min-width:0}.report-info .hosts{flex:1;text-align:center}
+    .report-stats{display:flex;justify-content:center;gap:36px;margin:14px 0 0;padding:9px 12px 0;border-top:1.5px solid #111;font-weight:700}
+    .person-main{font-weight:700}
+    .table-wrap{width:100%;overflow-x:auto;border:1px solid #111;border-radius:10px}
+    .attendance-table{width:100%;min-width:1380px;table-layout:fixed;border-collapse:collapse;border:0}
+    .attendance-table th,.attendance-table td{height:52px;padding:6px;border:1px solid #777;vertical-align:middle;text-align:center;word-break:break-word;overflow-wrap:anywhere;font-size:13px}
+    .attendance-table th{height:42px;background:#ededed;font-weight:700;white-space:normal}
+    .attendance-table input,.attendance-table select{width:100%;height:36px;min-height:36px;min-width:0;padding:4px 8px;border:1px solid #d8ceca;border-radius:7px;background:#fff;font-size:13px}
+    .attendance-table .readonly{background:#faf9f8}
+    .time-picker-inline{display:grid;grid-template-columns:minmax(44px,1fr) 10px minmax(44px,1fr);align-items:center;gap:3px}
+    .time-picker-inline select{width:100%;min-width:0;text-align:center;padding:3px 2px}
+    .time-picker-inline .time-colon{font-weight:700}
+    .print-time,.print-cell-value{display:none}
+    .attendance-table th:nth-child(1),.attendance-table td:nth-child(1){width:10%}
+    .attendance-table th:nth-child(2),.attendance-table td:nth-child(2){width:10%}
+    .attendance-table th:nth-child(3),.attendance-table td:nth-child(3){width:15%}
+    .attendance-table th:nth-child(4),.attendance-table td:nth-child(4){width:16%}
+    .attendance-table th:nth-child(5),.attendance-table td:nth-child(5){width:12%}
+    .attendance-table th:nth-child(6),.attendance-table td:nth-child(6){width:11%}
+    .attendance-table th:nth-child(7),.attendance-table td:nth-child(7){width:13%}
+    .attendance-table th:nth-child(8),.attendance-table td:nth-child(8){width:15%}
+    .attendance-table th:nth-child(9),.attendance-table td:nth-child(9){width:8%}
+    .page-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+    .page-actions-top{margin:0 0 18px;justify-content:flex-end}
+    .page-actions-top #back{margin-right:auto;order:-1}
+    .time-input-inline{width:100%;min-width:92px;padding:3px 4px}
+    .page-actions .btn{height:40px;display:inline-flex;align-items:center;justify-content:center}
+    @page{size:A4 portrait;margin:7mm}
+    @media print{
+      html,body{width:100%!important;height:auto!important;min-height:0!important;margin:0!important;padding:0!important;background:#fff!important;overflow:visible!important;font-family:"Microsoft JhengHei","Noto Sans TC",Arial,sans-serif!important}
+      #shell,.page-actions,.btn,.toast,.system-dialog-backdrop{display:none!important}
+      .app-main{display:block!important;width:100%!important;margin:0!important;padding:0!important;overflow:visible!important}
+      .attendance-report{width:100%!important;margin:0!important;padding:0!important;border-radius:0!important;overflow:visible!important}
+      .report-heading{margin:0 0 5px!important}
+      .hospital-full-name{font-size:14px!important;white-space:nowrap}
+      .report-heading h1{font-size:21px!important;margin:2px 0!important}
+      .report-heading h3{font-size:16px!important;margin:1px 0!important}
+      .report-info{grid-template-columns:1fr 1fr!important;gap:3px 10px!important;margin:5px 0!important;font-size:8px!important}
+      .table-wrap{width:100%!important;overflow:visible!important;border:0!important;border-radius:0!important}
+      .attendance-table{width:100%!important;min-width:0!important;table-layout:fixed!important;border-collapse:collapse!important;border:1.2px solid #000!important}
+      .attendance-table thead{display:table-header-group!important}
+      .attendance-table tr{page-break-inside:avoid!important}
+      .attendance-table th,.attendance-table td{height:22px!important;min-height:22px!important;font-size:6.5px!important;line-height:1.15!important;padding:2px 1px!important;border:1px solid #000!important;text-align:center!important;vertical-align:middle!important}
+      .attendance-table th{height:24px!important;background:#ededed!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+      .attendance-table input,.attendance-table select,.time-picker-inline{display:none!important}
+      .print-time,.print-cell-value{display:inline!important;font-size:6.5px!important;line-height:1.15!important}
+      .attendance-table th:nth-child(1),.attendance-table td:nth-child(1){width:9%!important}
+      .attendance-table th:nth-child(2),.attendance-table td:nth-child(2){width:9%!important}
+      .attendance-table th:nth-child(3),.attendance-table td:nth-child(3){width:14%!important}
+      .attendance-table th:nth-child(4),.attendance-table td:nth-child(4){width:15%!important}
+      .attendance-table th:nth-child(5),.attendance-table td:nth-child(5){width:12%!important}
+      .attendance-table th:nth-child(6),.attendance-table td:nth-child(6){width:9%!important}
+      .attendance-table th:nth-child(7),.attendance-table td:nth-child(7){width:12%!important}
+      .attendance-table th:nth-child(8),.attendance-table td:nth-child(8){width:13%!important}
+      .attendance-table th:nth-child(9),.attendance-table td:nth-child(9){width:7%!important}
+      .report-stats{gap:24px!important;margin:6px 0 0!important;padding:5px 8px 0!important;font-size:8px!important;page-break-inside:avoid!important}
+    }
+  </style>
+</head>
+<body>
+  <div id="shell"></div>
+  <main class="app-main">
+    <section class="attendance-report">
+      <div class="page-actions page-actions-top">
+        <button class="btn btn-primary" id="save" type="button">儲存</button>
+        <button class="btn btn-outline" id="excel" type="button">下載 Excel</button>
+        <button class="btn btn-outline" id="pdf" type="button">列印／另存 PDF</button>
+        <a class="btn btn-light" id="back">返回</a>
+      </div>
+      <div class="report-heading">
+        <h2 class="hospital-full-name">示範醫院</h2>
+        <h1 id="title">會議簽到單</h1>
+        <h3 id="subTitle"></h3>
+      </div>
+      <div class="report-info">
+        <div><b>時間：</b><span id="meetingTime">—</span></div>
+        <div class="hosts"><b>主持人：</b><span id="meetingHosts">—</span></div>
+        <div><b>地點：</b><span id="meetingLocation">—</span></div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table attendance-table">
+          <thead><tr><th>簽到時間</th><th>簽退時間</th><th>單位</th><th>姓名（員工編號）</th><th>職稱</th><th>出席狀況</th><th>代理人單位</th><th>代理人姓名（員工編號）</th><th>未出席原因</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="report-stats">
+        <span id="expectedStat">應到人數：<b id="expected">0</b></span>
+        <span>實到人數：<b id="actual">0</b></span>
+        <span id="rateStat">出席率：<b id="rate">0%</b></span>
+        <span id="openStat" hidden>開放非名單人員加入，不計算出席率</span>
+      </div>
+    </section>
+  </main>
+  <script src="app.js?v=20261118-ui1"></script>
+  <script>
+    initShell();
+    const attendanceParams=new URLSearchParams(location.search);
+    const meetingId=attendanceParams.get('id');
+    const returnSource=(attendanceParams.get('from')||'').trim().toLowerCase();
+    let meeting=null,rows=[],dirty=false,departments=[],usersByDepartment=new Map(),autoRefreshTimer=null,loadInFlight=false;
+    back.href=meetingId?(returnSource==='qr'?`qr.html?id=${encodeURIComponent(meetingId)}&from=${encodeURIComponent(attendanceParams.get('qrFrom')||'today')}`:`meeting-detail.html?id=${encodeURIComponent(meetingId)}`):'my-meetings.html';
+    back.textContent=returnSource==='qr'?'返回 QR Code':(meetingId?'返回會議資料':'返回我的會議');
+    const fullName=(name,id)=>id?`${name||''}（${id}）`:(name||'');
+    const rocYear=date=>{const y=Number(String(date||'').slice(0,4));return Number.isFinite(y)&&y>1911?y-1911:''};
+    const reportSubtitle=m=>{const year=rocYear(m?.date);const prefix=year?`${year}年度`:'';const period=(m?.subName||'').trim();return `${prefix}${period?` ${period}`:''}會議簽到單`};
+    const timeParts=value=>{const match=String(value||'').match(/^(\d{2}):(\d{2})$/);return match?{hour:match[1],minute:match[2]}:{hour:'',minute:''}};
+    const timePicker=(value,kind)=>`<input class="time-input-inline" type="time" step="60" data-time-kind="${kind}" value="${esc(timeParts(value).hour?value:'')}" aria-label="${kind==='in'?'簽到時間':'簽退時間'}"><span class="print-time" data-print-kind="${kind}">${esc(value||'')}</span>`;
+    const departmentOptions=selected=>`<option value="">不指定</option>${departments.map(d=>`<option value="${esc(d.departmentID)}"${d.departmentName===selected||d.departmentID===selected?' selected':''}>${esc(d.departmentName)}</option>`).join('')}`;
+    async function getUsers(departmentId){if(!departmentId)return[];if(!usersByDepartment.has(departmentId))usersByDepartment.set(departmentId,apiJsonCached(`api/users?departmentId=${encodeURIComponent(departmentId)}`,{},300000));return await usersByDepartment.get(departmentId)}
+    async function proxyUserOptions(row,departmentId){const users=await getUsers(departmentId);return `<option value="">不指定</option>${users.map(u=>`<option value="${esc(u.userID)}"${u.userID===row.proxyEmployeeNo?' selected':''}>${esc(fullName(u.name,u.employeeId))}</option>`).join('')}`}
+    function updateStats(){const s=attendanceSummary(meeting,rows);actual.textContent=s.attended;expectedStat.hidden=s.open;rateStat.hidden=s.open;openStat.hidden=!s.open;if(!s.open){expected.textContent=s.expected;rate.textContent=`${s.rate}%`}}
+    function resetAttendanceRow(tr,row){
+      row.in='';row.out='';row.attendanceStatus='未出席';row.proxyEmployeeNo='';row.proxyName='';row.proxyDepartment='';row.note='';
+      for(const kind of ['in','out']){
+        const input=tr.querySelector(`input[data-time-kind="${kind}"]`);if(input)input.value='';const print=tr.querySelector(`[data-print-kind="${kind}"]`);if(print)print.textContent='';
+      }
+      const status=tr.querySelector('[data-status]');if(status)status.value='未出席';
+      const printStatus=tr.querySelector('[data-print-status]');if(printStatus)printStatus.textContent='未出席';
+      const dept=tr.querySelector('[data-proxy-department]');if(dept)dept.value='';
+      const proxy=tr.querySelector('[data-proxy-user]');if(proxy)proxy.innerHTML='<option value="">不指定</option>';
+      const printDept=tr.querySelector('[data-print-proxy-department]');if(printDept)printDept.textContent='';
+      const printProxy=tr.querySelector('[data-print-proxy-user]');if(printProxy)printProxy.textContent='';
+      const note=tr.querySelector('[data-k="note"]');if(note)note.value='';
+    }
+    async function render(){
+      tbody.innerHTML=rows.length?rows.map((r,i)=>`<tr data-i="${i}">
+        <td>${timePicker(r.in,'in')}</td>
+        <td>${timePicker(r.out,'out')}</td>
+        <td class="readonly">${esc(r.department||'')}</td>
+        <td class="readonly"><div class="person-main">${esc(fullName(r.name,r.employeeId))}</div></td>
+        <td class="readonly">${esc(r.title||'')}</td>
+        <td><select class="attendance-status-select" data-status><option value="出席"${r.attendanceStatus==='出席'?' selected':''}>出席</option><option value="未出席"${r.attendanceStatus!=='出席'?' selected':''}>未出席</option></select><span class="print-cell-value" data-print-status>${esc(r.attendanceStatus||'未出席')}</span></td>
+        <td><select data-proxy-department>${departmentOptions(r.proxyDepartment||'')}</select><span class="print-cell-value" data-print-proxy-department>${esc(r.proxyDepartment||'')}</span></td>
+        <td><select data-proxy-user><option value="${esc(r.proxyEmployeeNo||'')}">${esc(r.proxyEmployeeNo?fullName(r.proxyName,r.proxyEmployeeNo):'不指定')}</option></select><span class="print-cell-value" data-print-proxy-user>${esc(r.proxyEmployeeNo?fullName(r.proxyName,r.proxyEmployeeNo):'')}</span></td>
+        <td><input data-k="note" value="${esc(r.note||'')}"></td>
+      </tr>`).join(''):'<tr><td colspan="9" class="readonly">此會議尚未設定參與人員。</td></tr>';
+      const proxyRows=[...tbody.querySelectorAll('tr[data-i]')].map(tr=>{
+        const index=Number(tr.dataset.i),row=rows[index];
+        const selectedDept=departments.find(d=>d.departmentName===row.proxyDepartment||d.departmentID===row.proxyDepartment);
+        return {tr,row,selectedDept};
+      });
+      const proxyDepartmentIds=[...new Set(proxyRows.filter(x=>x.selectedDept).map(x=>x.selectedDept.departmentID))];
+      await Promise.all(proxyDepartmentIds.map(getUsers));
+      for(const item of proxyRows){
+        if(!item.selectedDept)continue;
+        const deptSelect=item.tr.querySelector('[data-proxy-department]');
+        deptSelect.value=item.selectedDept.departmentID;
+        item.tr.querySelector('[data-proxy-user]').innerHTML=await proxyUserOptions(item.row,item.selectedDept.departmentID);
+      }
+      tbody.querySelectorAll('input[data-k]').forEach(el=>el.addEventListener('input',()=>{const index=Number(el.closest('tr').dataset.i);rows[index][el.dataset.k]=el.value;dirty=true}));
+      tbody.querySelectorAll('input[data-time-kind]').forEach(el=>el.addEventListener('change',()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index],kind=el.dataset.timeKind;const value=(el.value||'').slice(0,5);if(/^\d{2}:\d{2}$/.test(value)){row[kind]=value;tr.querySelector(`[data-print-kind="${kind}"]`).textContent=row[kind];if(kind==='in'){row.attendanceStatus='出席';tr.querySelector('[data-status]').value='出席';tr.querySelector('[data-print-status]').textContent='出席'}}else if(!value){row[kind]='';tr.querySelector(`[data-print-kind="${kind}"]`).textContent='';if(kind==='in')resetAttendanceRow(tr,row)}dirty=true;updateStats()}));
+      tbody.querySelectorAll('select[data-status]').forEach(el=>el.addEventListener('change',()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index];row.attendanceStatus=el.value;tr.querySelector('[data-print-status]').textContent=el.value;if(el.value==='未出席'){resetAttendanceRow(tr,row)}else if(!row.in){const now=new Date(),hour=String(now.getHours()).padStart(2,'0'),minute=String(now.getMinutes()).padStart(2,'0');row.in=`${hour}:${minute}`;tr.querySelector('input[data-time-kind="in"]').value=row.in;tr.querySelector('[data-print-kind="in"]').textContent=row.in}dirty=true;updateStats()}));
+      tbody.querySelectorAll('[data-proxy-department]').forEach(el=>el.addEventListener('change',async()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index],dept=departments.find(d=>d.departmentID===el.value);row.proxyDepartment=dept?.departmentName||'';row.proxyEmployeeNo='';row.proxyName='';tr.querySelector('[data-proxy-user]').innerHTML=await proxyUserOptions(row,el.value);tr.querySelector('[data-print-proxy-department]').textContent=row.proxyDepartment;tr.querySelector('[data-print-proxy-user]').textContent='';dirty=true}));
+      tbody.querySelectorAll('[data-proxy-user]').forEach(el=>el.addEventListener('change',async()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index],deptId=tr.querySelector('[data-proxy-department]').value,users=await getUsers(deptId),user=users.find(u=>u.userID===el.value);row.proxyEmployeeNo=user?.userID||'';row.proxyName=user?.name||'';row.proxyDepartment=user?.dept||row.proxyDepartment||'';tr.querySelector('[data-print-proxy-user]').textContent=row.proxyEmployeeNo?fullName(row.proxyName,row.proxyEmployeeNo):'';if(row.proxyEmployeeNo){row.attendanceStatus='出席';tr.querySelector('[data-status]').value='出席';tr.querySelector('[data-print-status]').textContent='出席'}dirty=true}));
+      updateStats();
+    }
+    async function load({silent=false}={}){
+      if(!meetingId){title.textContent='找不到會議';save.disabled=true;return}
+      if((silent&&dirty)||loadInFlight)return;
+      loadInFlight=true;
+      try{
+        const [result,depts]=await Promise.all([
+          apiJson(`api/meetings/${encodeURIComponent(meetingId)}/attendance?userId=${encodeURIComponent(currentUserID())}`),
+          departments.length?Promise.resolve(departments):apiJsonCached('api/departments',{},300000)
+        ]);
+        if(!result || typeof result!=='object' || !result.meeting){
+          throw new Error('簽到名單 API 回傳格式不正確，請確認 IIS Application 路徑與後端 API 是否正常。');
+        }
+        meeting=result.meeting;
+        rows=result.rows||[];
+        departments=depts||[];
+        title.textContent=meeting.name;
+        subTitle.textContent=reportSubtitle(meeting);
+        meetingTime.textContent=`${meeting.date} ${meeting.start}～${meeting.end}`;
+        meetingHosts.textContent=Array.isArray(meeting.hosts)&&meeting.hosts.length?meeting.hosts.join('、'):(meeting.host||'無');
+        meetingLocation.textContent=meeting.location||'無';
+        await render();
+      }catch(e){
+        if(!silent){
+          title.textContent='無法讀取簽到名單';
+          subTitle.textContent=e.message;
+          tbody.innerHTML='<tr><td colspan="9" class="readonly">請確認資料庫欄位及會議權限。</td></tr>';
+          save.disabled=true;
+        }
+      }finally{
+        loadInFlight=false;
+      }
+    }
+    save.addEventListener('click',async()=>{save.disabled=true;try{await apiJson(`api/meetings/${encodeURIComponent(meetingId)}/attendance?userId=${encodeURIComponent(currentUserID())}`,{method:'PUT',body:JSON.stringify({rows:rows.map(r=>({userID:r.userID,in:r.in||null,out:r.out||null,operator:r.proxyEmployeeNo||'',note:r.note||''}))})});dirty=false;await showDialog('簽到名單已儲存',{type:'success'});await load()}catch(e){notifyError(e.message)}finally{save.disabled=false}});
+    excel.addEventListener('click',()=>meeting&&downloadExcel(rows,meeting));
+    pdf.addEventListener('click',()=>window.print());
+    window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!dirty)load({silent:true})});
+    autoRefreshTimer=setInterval(()=>{if(!document.hidden&&!dirty)load({silent:true})},5000);
+    load();
+  </script>
+</body>
+</html>

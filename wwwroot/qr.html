@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>會議 QR Code</title>
+  <link rel="stylesheet" href="app.css?v=20261118-ui1">
+  <style>.notice-muted{background:#f1efed;color:#625c58}</style>
+</head>
+<body>
+  <div id="shell"></div>
+  <main class="main">
+    <div class="page-title">
+      <h1 id="title">會議 QR Code</h1>
+      <p>請使用 LINE 掃描 QR Code，依手機畫面完成簽到或簽退。</p>
+    </div>
+    <div class="qr-layout">
+      <section class="panel qr-card">
+        <div class="qr-box" id="qr"><img id="qrImage" alt="會議簽到 QR Code"></div>
+        <div class="notice" id="qrNotice">請使用 LINE 掃描 QR Code 完成簽到／簽退</div>
+      </section>
+      <section class="panel">
+        <h2>會議資訊</h2>
+        <div id="info"></div>
+        <div class="stats">
+          <div class="stat"><span>目前簽到</span><strong id="signedInCount">0</strong></div>
+          <div class="stat"><span>已簽退</span><strong id="signedOutCount">0</strong></div>
+          <div class="stat" id="expectedStat"><span>應到人數</span><strong id="expectedCount">0</strong></div>
+        </div>
+        <div class="actions">
+          <a id="listBtn" class="btn btn-primary" style="display:none">查看簽到名單</a>
+          <a class="btn btn-light" id="backBtn" href="sign-in.html">返回今日會議</a>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="app.js?v=20261118-ui1"></script><script>
+    initShell();
+    (async()=>{
+      let meeting=null,statsRequestInFlight=false;
+      const qrParams=new URLSearchParams(location.search),id=qrParams.get('id'),qrFrom=qrParams.get('from')==='detail'?'detail':'today';
+      if(qrFrom==='detail'){backBtn.href=`meeting-detail.html?id=${encodeURIComponent(id)}`;backBtn.textContent='返回會議資料'}
+      async function refreshStats(){
+        if(statsRequestInFlight)return;
+        statsRequestInFlight=true;
+        try{
+          const result=await apiJson(`api/meetings/${encodeURIComponent(id)}/attendance?userId=${encodeURIComponent(currentUserID())}`);
+          const allRows=result.rows||[];
+          // 固定名單會議只統計名單內的人，和簽到名單、會議資料頁的規則一致。
+          const rows=meeting?.allowUnlistedParticipants?allRows:allRows.filter(r=>r.participantType!=='External');
+          signedInCount.textContent=rows.filter(x=>x.in).length;
+          signedOutCount.textContent=rows.filter(x=>x.out).length;
+          const summary=attendanceSummary(meeting,rows);expectedStat.hidden=summary.open;if(!summary.open)expectedCount.textContent=summary.expected;
+        }catch{}finally{statsRequestInFlight=false}
+      }
+      try{
+        const r=await apiJson(`api/meetings/${id}?userId=${encodeURIComponent(currentUserID())}`),m=r.meeting;meeting=m;
+        title.textContent=m.name;
+        if(m.relation!=='host')throw new Error('您沒有權限查看此會議 QR Code。');qrImage.src=`api/qr-code/${encodeURIComponent(m.qrCode)}?userId=${encodeURIComponent(currentUserID())}&v=20260811-rc1-pathfix`;
+        info.innerHTML=`<p><b>日期時間：</b>${esc(m.date)} ${esc(m.start)}-${esc(m.end)}</p><p><b>地點：</b>${esc(m.location||'無')}</p><p><b>主持人：</b>${esc((Array.isArray(m.hosts)&&m.hosts.length?m.hosts.join('、'):(m.host||'無')))}</p><p><b>備註：</b>${esc(m.note||'無')}</p>`;
+        expectedStat.hidden=!!m.allowUnlistedParticipants;
+        const updateQrState=()=>{
+          const state=meetingAccessState(m),{openAt,end}=meetingWindow(m),hm=d=>`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+          qrNotice.textContent=state==='closed'
+            ?`本會議已於 ${hm(end)} 結束，無法再簽到。`
+            :state==='pending'?`簽到將於 ${m.date===localDateString(openAt)?'':localDateString(openAt)+' '}${hm(openAt)} 開放，可先列印或投影此 QR Code。`
+            :'請使用 LINE 掃描 QR Code 完成簽到／簽退';
+          qrNotice.classList.toggle('notice-muted',state==='closed');
+          qrImage.style.opacity=state==='closed'?'.35':'';
+        };
+        updateQrState();setInterval(updateQrState,30000);
+        if(m.relation==='host'){listBtn.style.display='inline-block';listBtn.href=`attendance.html?id=${encodeURIComponent(m.id)}&from=qr&qrFrom=${qrFrom}`;await refreshStats();setInterval(refreshStats,5000)}
+      }catch(e){info.textContent=e.message;qrImage.removeAttribute('src');showDialog(e.message)}
+    })();
+  </script></body>
+</html>

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>會議資料</title>
+  <link rel="stylesheet" href="app.css?v=20261118-ui1">
+  <style>
+    .detail-page-title{margin-bottom:18px}
+    .detail-page-title h1{font-size:clamp(1.9rem,3vw,2.45rem);margin-bottom:4px}
+    .detail-page-title p{font-size:1rem;color:#8b817c}
+    .meeting-detail-panel{padding:30px}
+    .detail-summary{border:1px solid #e8dfda;border-radius:16px;background:#fff;overflow:hidden}
+    .detail-topline{display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:20px 22px;border-bottom:1px solid #eee6e2}
+    .detail-main-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid #eee6e2}
+    .detail-main-item{padding:20px 22px;border-right:1px solid #f0e9e5}
+    .detail-main-item:last-child{border-right:0}
+    .detail-hosts{padding:20px 22px;border-bottom:1px solid #eee6e2}
+    .detail-label{display:block;margin-bottom:7px;color:#837874;font-size:.82rem;font-weight:700;letter-spacing:.02em}
+    .detail-value{display:block;color:#2f2b29;font-size:1.08rem;font-weight:700;line-height:1.5;word-break:break-word}
+    .detail-hosts .detail-value{font-size:1.05rem}
+    .attendance-block{margin:20px 22px;padding:18px 20px;border-radius:12px;background:#faf7f5}
+    .attendance-value{font-size:2rem;font-weight:800;color:#b51f2a;line-height:1}
+    .attendance-unit{margin-left:4px;color:#2f2b29;font-weight:700}
+    .note-card{margin-top:20px;padding:18px 20px;border:1px solid #e8dfda;border-radius:14px;background:#fff}
+    .note-card .detail-value{font-weight:500;white-space:pre-line}
+    .detail-actions{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-top:24px}
+    .detail-actions-primary,.detail-actions-secondary{display:flex;gap:10px;flex-wrap:wrap}
+    .btn-danger-outline{background:#fff;border:1px solid var(--red);color:var(--red)}
+    .detail-actions-top{margin:0 0 20px}
+    .detail-state-tag{font-size:.9rem;vertical-align:middle;margin-left:8px}
+    .attendance-summary{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;color:#2f2b29;font-weight:700}
+    .detail-meta{padding:14px 22px;color:#8b817c;font-size:.86rem}
+    .btn-danger-outline:hover{background:#fff3f4}
+    @media(max-width:820px){
+      .meeting-detail-panel{padding:20px}
+      .detail-topline,.detail-main-grid{grid-template-columns:1fr}
+      .detail-topline{gap:14px}
+      .detail-main-item{border-right:0;border-bottom:1px solid #f0e9e5}
+      .detail-main-item:last-child{border-bottom:0}
+      .detail-actions{align-items:stretch}
+      .detail-actions-primary,.detail-actions-secondary{width:100%}
+      .detail-actions .btn{flex:1;text-align:center}
+    }
+  </style>
+</head>
+<body>
+  <div id="shell"></div>
+  <main class="main">
+    <div class="page-title detail-page-title">
+      <h1 id="title">會議資料</h1>
+      <p id="sub"></p>
+    </div>
+    <section id="content" class="panel"></section>
+  </main>
+
+  <script src="app.js?v=20261118-ui1"></script>
+  <script>
+    initShell();
+    const params=new URLSearchParams(location.search),id=params.get('id'),content=document.querySelector('#content');let meeting;
+    const backTarget=params.get('from')==='today'?{href:'sign-in.html',text:'返回今日會議'}:{href:'my-meetings.html',text:'返回我的會議'};
+    const flash=sessionStorage.getItem('meetingFlash');if(flash){sessionStorage.removeItem('meetingFlash');setTimeout(()=>notifySuccess(flash),100)}
+    const formatDate=value=>String(value||'').replaceAll('-','/');
+    (async()=>{try{
+      const r=await apiJson(`api/meetings/${id}?userId=${encodeURIComponent(currentUserID())}`);
+      meeting=r.meeting;
+      title.textContent=meeting.name;
+      sub.textContent=meeting.subName||'';
+      const last=meeting.lastSavedAt?new Date(meeting.lastSavedAt).toLocaleString('zh-TW',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+      const hosts=(meeting.hosts||[meeting.host]).filter(Boolean);
+      const hostText=hosts.length?hosts.map(x=>esc(x)).join('、'):'—';
+      const note=String(meeting.note||'').trim();
+      content.classList.add('meeting-detail-panel');
+      const isHost=meeting.relation==='host';
+      const state=meetingAccessState(meeting);
+      const stateText={open:'進行中',pending:'尚未開始',closed:'已結束'}[state];
+      title.innerHTML=`${esc(meeting.name)} <span class="tag ${state} detail-state-tag">${stateText}</span>`;
+      const qrBtn=cls=>`<a class="btn ${cls}" href="qr.html?id=${encodeURIComponent(id)}&from=detail">開啟 QR Code</a>`;
+      const listBtn=cls=>`<a class="btn ${cls}" href="attendance.html?id=${encodeURIComponent(id)}">查看簽到名單</a>`;
+      // 已結束的會議最常做的是看簽到名單；尚未結束則以開啟 QR Code 為主要操作。
+      const primaryActions=!isHost?'':(state==='closed'?listBtn('btn-primary')+qrBtn('btn-outline'):qrBtn('btn-primary')+listBtn('btn-outline'))
+        +`<a class="btn btn-outline" href="create-meeting.html?id=${encodeURIComponent(id)}">修改會議</a>`;
+      content.innerHTML=`
+        <div class="detail-actions detail-actions-top">
+          <div class="detail-actions-primary">${isHost?primaryActions:''}</div>
+          <div class="detail-actions-secondary">
+            <a class="btn btn-light" href="${backTarget.href}">${backTarget.text}</a>
+            ${isHost?`<button class="btn btn-danger-outline" id="deleteMeeting">刪除會議</button>`:''}
+          </div>
+        </div>
+        <section class="detail-summary">
+          <div class="detail-main-grid">
+            <div class="detail-main-item"><span class="detail-label">日期</span><span class="detail-value">${esc(formatDate(meeting.date))}</span></div>
+            <div class="detail-main-item"><span class="detail-label">時間</span><span class="detail-value">${esc(meeting.start)}～${esc(meeting.end)}</span></div>
+            <div class="detail-main-item"><span class="detail-label">地點</span><span class="detail-value">${esc(meeting.location||'無')}</span></div>
+          </div>
+          <div class="detail-hosts"><span class="detail-label">主持人</span><span class="detail-value">${hostText}</span></div>
+          <div class="attendance-block">
+            <span class="detail-label">${meeting.allowUnlistedParticipants?'出席狀況（開放非名單人員加入，不計算出席率）':'出席狀況'}</span>
+            <div id="attendanceSummaryBox" class="attendance-summary">${meeting.allowUnlistedParticipants?'':`應到 <span class="attendance-value">${meeting.participantCount??0}</span><span class="attendance-unit">人</span>`}</div>
+          </div>
+          <div class="detail-meta">會議編號 ${esc(meeting.meetingNo||meeting.id)}　·　最後更新 ${esc(last)}</div>
+        </section>
+        ${note?`<div class="note-card"><span class="detail-label">會議說明／備註</span><span class="detail-value">${esc(note)}</span></div>`:''}`;
+      if(isHost){
+        apiJson(`api/meetings/${encodeURIComponent(id)}/attendance?userId=${encodeURIComponent(currentUserID())}`).then(result=>{
+          const s=attendanceSummary(meeting,result.rows||[]);
+          document.querySelector("#attendanceSummaryBox").innerHTML=s.open
+            ?`實到 <span class="attendance-value">${s.attended}</span><span class="attendance-unit">人</span>`
+            :`應到 <span class="attendance-value">${s.expected}</span><span class="attendance-unit">人</span>　實到 <span class="attendance-value">${s.attended}</span><span class="attendance-unit">人</span>　出席率 <span class="attendance-value">${s.rate}%</span>`;
+        }).catch(()=>{});
+      }
+      document.querySelector('#deleteMeeting')?.addEventListener('click',removeMeeting)
+    }catch(e){title.textContent='找不到會議';sub.textContent=e.message;content.innerHTML='<a class="btn btn-light" href="my-meetings.html">返回我的會議</a>'}})();
+    async function removeMeeting(){if(!await showConfirm(`確定刪除「${meeting.name}」？`,{confirmText:'確定刪除'}))return;try{await apiJson(`api/meetings/${id}?userId=${encodeURIComponent(currentUserID())}`,{method:'DELETE'});sessionStorage.setItem('meetingFlash','會議已刪除');location.href='my-meetings.html'}catch(e){notifyError(e.message)}}
+  </script>
+</body>
+</html>
