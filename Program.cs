@@ -180,5 +180,8 @@ app.MapFallback(async context =>
 
     await context.Response.SendFileAsync(
         Path.Combine(app.Environment.WebRootPath, "index.html"));
-});
+})
+// 根路徑「/」與不存在的頁面都會落到這裡並回傳登入頁，所以不能要求登入，
+// 否則還沒登入的人連登入頁都看不到。這裡只回傳登入頁或 404 訊息，不含任何資料。
+.AllowAnonymous();
 app.Run();
