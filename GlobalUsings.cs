@@ -1,0 +1,25 @@
+// 整個專案共用的命名空間；拆檔後各檔案不必重複 using。
+global using System.Data;
+global using System.Net;
+global using System.Net.Sockets;
+global using System.Text.RegularExpressions;
+global using System.Security.Cryptography;
+global using System.Text;
+global using System.Text.Json;
+global using System.Collections.Concurrent;
+global using Microsoft.Data.SqlClient;
+global using Microsoft.AspNetCore.DataProtection;
+global using Microsoft.AspNetCore.Authentication;
+global using Microsoft.AspNetCore.Authentication.Cookies;
+global using Microsoft.AspNetCore.Authorization;
+global using System.Security.Claims;
+global using QRCoder;
+global using MeetingCheckin;
+global using static MeetingCheckin.Db;
+global using static MeetingCheckin.RequestContext;
+global using static MeetingCheckin.MeetingTokens;
+global using static MeetingCheckin.Participants;
+global using static MeetingCheckin.MobileSession;
+global using static MeetingCheckin.LineEndpoints;
+global using static MeetingCheckin.MeetingEndpoints;
+global using static MeetingCheckin.AttendanceEndpoints;

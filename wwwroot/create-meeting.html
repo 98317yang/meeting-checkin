@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title id="documentTitle">發起會議</title>
-  <link rel="stylesheet" href="app.css?v=20261118-ui1">
+  <link rel="stylesheet" href="app.css?v=20261119-liff2">
 <style>.participant-check-item.is-added{opacity:.55}.participant-picker.participant-picker-multi{grid-template-columns:1fr 1fr}@media(max-width:820px){.participant-picker.participant-picker-multi{grid-template-columns:1fr}}</style>
 </head>
 <body>
@@ -111,8 +111,8 @@
     </form>
   </main>
 
-  <script src="app.js?v=20261118-ui1"></script>
-  <script src="material-timepicker-v7.js?v=20261118-ui1"></script>
+  <script src="app.js?v=20261119-liff2"></script>
+  <script src="material-timepicker-v7.js?v=20261119-liff2"></script>
   <script>
     initShell();
     const form=document.querySelector('#meetingForm');
@@ -278,7 +278,7 @@
         meetingEnd.addEventListener('change',()=>{endTimeManuallyChanged=true;});
 
         if(editingId){
-          const result=await apiJson(`api/meetings/${editingId}?userId=${encodeURIComponent(currentId)}`);existing=result.meeting;
+          const result=await apiJson(`api/meetings/${editingId}`);existing=result.meeting;
           if(existing.relation!=='host')throw new Error('只有會議發起者可以修改會議');
           form.elements.name.value=existing.name||'';form.elements.subName.value=existing.subName||'';form.elements.date.value=existing.date;form.elements.start.value=existing.start;form.elements.end.value=existing.end;meetingNote.value=existing.note||'';syncOpenNote();
           allowUnlisted.checked=!!existing.allowUnlistedParticipants;
@@ -286,8 +286,17 @@
           if(existing.hasLocation){if(existing.locationID){locationSelect.value=String(existing.locationID);}else if(existing.location&&existing.location!=='無'){locationSelect.value='custom';updateCustomLocation();customLocation.value=existing.location;}}
           await Promise.all([setHost(0,existing.host1UserID),setHost(1,existing.host2UserID),setHost(2,existing.host3UserID)]);
           const currentHosts=new Set(hostIds());
-          (result.participants||[]).forEach(x=>{if(String(x.participantType||'').toLowerCase()==='internal'&&x.userID&&!currentHosts.has(x.userID))selected.set(x.userID,{...x,dept:(x.dept||x.department||x.organization||'').trim()});});
+          (result.participants||[]).forEach(x=>{if(String(x.participantType||'').toLowerCase()==='internal'&&(x.source||'Invited')==='Invited'&&x.userID&&!currentHosts.has(x.userID))selected.set(x.userID,{...x,dept:(x.dept||x.department||x.organization||'').trim()});});
           await renderSelected();
+          // 依會議狀態鎖定欄位。後端也會檢查，這裡是讓使用者一開始就知道哪些不能改。
+          const locks=[];
+          if(existing.hasAttendance){meetingDate.disabled=true;locks.push('已有人簽到，會議日期不能修改');}
+          if(new Date(existing.endDateTime)<new Date()){
+            [host1Dept,host1,host2Dept,host2,host3Dept,host3,allowUnlisted,participantDept,participantSearch,addParticipant].forEach(el=>{if(el)el.disabled=true});
+            participantChecklist.classList.add('disabled');selectedPeople.classList.add('disabled');
+            locks.push('會議已結束，主持人、參與名單與開放設定不能修改');
+          }
+          if(locks.length){const notice=document.createElement('div');notice.className='notice';notice.style.marginBottom='16px';notice.textContent=locks.join('；')+'。';form.prepend(notice);}
         }else{
           form.elements.date.value=localDateString();updateLocationControl();
           const currentDepartment=(user.departmentId||user.dpid||'').trim();
@@ -307,7 +316,7 @@
       if(!form.elements.start.value||!form.elements.end.value)return notifyWarning('請選擇會議開始及結束時間');
       if(form.elements.end.value<=form.elements.start.value)return notifyWarning('會議結束時間必須晚於開始時間');
       const hosts=hostIds();if(!host1.value)return notifyWarning('請選擇主持人 1');if(new Set(hosts).size!==hosts.length)return notifyWarning('主持人不可重複');
-      const payload={name:meetingName.value.trim(),subName:meetingSubName.value.trim(),date:meetingDate.value,start:meetingStart.value,end:meetingEnd.value,hasLocation:has,locationID:has&&!customLocationSelected?locationSelect.value:null,customLocation:has&&customLocationSelected?customLocation.value.trim():null,host1UserID:host1.value,host2UserID:host2.value||null,host3UserID:host3.value||null,note:meetingNote.value.trim(),currentUserID:currentId,participantUserIDs:[...selected.keys()],allowUnlistedParticipants:allowUnlisted.checked};
+      const payload={name:meetingName.value.trim(),subName:meetingSubName.value.trim(),date:meetingDate.value,start:meetingStart.value,end:meetingEnd.value,hasLocation:has,locationID:has&&!customLocationSelected?locationSelect.value:null,customLocation:has&&customLocationSelected?customLocation.value.trim():null,host1UserID:host1.value,host2UserID:host2.value||null,host3UserID:host3.value||null,note:meetingNote.value.trim(),participantUserIDs:[...selected.keys()],allowUnlistedParticipants:allowUnlisted.checked,rowVersion:existing?.rowVersion||null};
       submitButton.disabled=true;
       try{const result=await apiJson(editingId?`api/meetings/${editingId}`:'api/meetings',{method:editingId?'PUT':'POST',body:JSON.stringify(payload)});sessionStorage.setItem('meetingFlash',editingId?'會議資料已更新':`會議已建立${result.meetingNo?'，編號：'+result.meetingNo:''}`);location.href=`meeting-detail.html?id=${encodeURIComponent(result.meetingID)}`;}catch(e){notifyError(e.message);submitButton.disabled=false;}
     };

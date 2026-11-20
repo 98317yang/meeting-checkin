@@ -6,6 +6,13 @@
     <UserSecretsId>meeting-checkin-77c9e0d97cac</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
+    <!-- 測試專案放在 tests/ 底下，不要被主專案一起編譯。 -->
+    <Compile Remove="tests/**" />
+    <Content Remove="tests/**" />
+    <None Remove="tests/**" />
+    <InternalsVisibleTo Include="MeetingCheckin.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
   </ItemGroup>

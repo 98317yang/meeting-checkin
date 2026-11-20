@@ -15,6 +15,9 @@ appsettings.Local.json
 .env.*
 !.env.example
 
+# DataProtection keys (encrypt mobile sessions; machine-specific secrets)
+keys/
+
 # OS / Office temp files
 .DS_Store
 Thumbs.db

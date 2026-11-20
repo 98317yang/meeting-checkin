@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#b51f2a">
   <title>手機簽到｜會議簽到系統</title>
-  <link rel="stylesheet" href="app.css?v=20261118-ui1">
+  <link rel="stylesheet" href="app.css?v=20261119-liff2">
 
   <style>
     .mobile-topbar-user{
@@ -78,7 +78,7 @@
     </section>
   </main>
 
-  <script src="app.js?v=20261118-ui1"></script>
+  <script src="app.js?v=20261119-liff2"></script>
   <script>
     const params=new URLSearchParams(location.search);
     const source=(params.get('source')||'').trim().toLowerCase();
@@ -192,6 +192,7 @@
         <section class="mobile-operation-card">
           <h2 class="mobile-section-heading">填寫簽到資料</h2>
           <p class="mobile-section-description">請直接填寫以下資料。</p>
+          <p class="mobile-help">院內員工請先洽資訊室完成 LINE 綁定。</p>
           <div class="field guest-profile-field"><label for="guestOrganization">單位</label><input id="guestOrganization" type="text" maxlength="200" autocomplete="organization" placeholder="請輸入單位"></div>
           <div class="field guest-profile-field"><label for="guestName">姓名</label><input id="guestName" type="text" maxlength="100" autocomplete="name" placeholder="請輸入姓名"></div>
           <div class="field guest-profile-field"><label for="guestTitle">職稱</label><input id="guestTitle" type="text" maxlength="100" placeholder="請輸入職稱"></div>

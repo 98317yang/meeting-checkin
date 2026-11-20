@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Build and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build
+        run: dotnet build MeetingLogin.Api.csproj -c Release
+      - name: Unit tests
+        run: dotnet test tests/MeetingCheckin.Tests -c Release --logger "console;verbosity=normal"
+
+  database:
+    name: Database scripts
+    runs-on: ubuntu-latest
+    env:
+      SA_PASSWORD: Ci-Sa-Passw0rd!
+      APP_PASSWORD: Ci-App-Passw0rd!
+    services:
+      sql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: Ci-Sa-Passw0rd!
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'Ci-Sa-Passw0rd!' -Q 'SELECT 1' -b -o /dev/null"
+          --health-interval 10s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare sqlcmd
+        run: |
+          cat > sqlcmd.sh <<'SH'
+          #!/bin/bash
+          docker run --rm --network host -v "$PWD/db:/db:ro" mcr.microsoft.com/mssql/server:2022-latest \
+            /opt/mssql-tools18/bin/sqlcmd -C -I -S localhost -b "$@"
+          SH
+          chmod +x sqlcmd.sh
+      - name: Create schema and demo data
+        run: ./sqlcmd.sh -U sa -P "$SA_PASSWORD" -v APP_DB_PASSWORD="$APP_PASSWORD" -i /db/01-schema.sql -i /db/02-seed.sql
+      - name: Run the scripts again (must be idempotent)
+        run: ./sqlcmd.sh -U sa -P "$SA_PASSWORD" -v APP_DB_PASSWORD="$APP_PASSWORD" -i /db/01-schema.sql -i /db/02-seed.sql
+      - name: Check demo data and Taipei clock
+        run: |
+          ./sqlcmd.sh -U sa -P "$SA_PASSWORD" -d LineMeeting -Q "
+            IF (SELECT COUNT(*) FROM dbo.Meeting) <> 4 THROW 50000, 'expected 4 demo meetings', 1;
+            IF (SELECT COUNT(*) FROM dbo.MeetingAttendanceLog) = 0 THROW 50000, 'audit trigger wrote nothing', 1;
+            IF DATEDIFF(MINUTE, SYSUTCDATETIME(), dbo.AppNow()) NOT BETWEEN 479 AND 481 THROW 50000, 'AppNow is not UTC+8', 1;"
+      - name: App account can use the Taipei clock
+        run: ./sqlcmd.sh -U meeting_app -P "$APP_PASSWORD" -d LineMeeting -Q "SELECT dbo.AppNow();"
+      - name: App account cannot rewrite the audit log
+        run: |
+          if ./sqlcmd.sh -U meeting_app -P "$APP_PASSWORD" -d LineMeeting -Q "DELETE FROM dbo.MeetingAttendanceLog;"; then
+            echo "meeting_app was able to delete audit rows"; exit 1
+          fi
+          echo "Denied as expected."

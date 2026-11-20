@@ -9,6 +9,9 @@ function enforceDesktopLogin(){
   location.replace('./');
   return false;
 }
+// 清除瀏覽器裡的登入資料。真正的登入狀態在伺服器簽發的 HttpOnly cookie，登出時要一併請伺服器清除。
+function clearDesktopSession(){['meetingLoginUser','meetingFlash','meetingLoginUserProfileAt','meetingLiffMeeting','meetingLiffUser'].forEach(k=>sessionStorage.removeItem(k));try{localStorage.removeItem('meetingLoginUser');localStorage.removeItem('meetingLiffUser')}catch{}}
+async function logoutDesktop(){try{await fetch('api/auth/logout',{method:'POST'})}catch{}clearDesktopSession();location.replace('./')}
 enforceDesktopLogin();
 window.addEventListener('pageshow',()=>enforceDesktopLogin());
 window.addEventListener('focus',()=>enforceDesktopLogin());
@@ -71,15 +74,7 @@ window.meetingAccessState=meetingAccessState;
 window.effectiveStatus=meetingAccessState;
 function formatDateTimeHM(value){const d=new Date(value);return Number.isNaN(d.getTime())?'':`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`}
 function shell(active=''){const u=getUser();const displayName=u.name||'使用者';const displayEmployee=(u.sntopid||u.employeeId||'').trim()||'未設定';const displayDepartment=(u.dpcnm||u.department||u.departmentId||'').trim()||'未設定';const displayTitle=(u.dutnm||u.title||'').trim()||'未設定';return `<header class="app-header"><a class="brand" href="dashboard.html" aria-label="回主選單"><img src="assets/logo.svg" alt="示範醫院"></a><div class="header-actions">${currentPageName()==='dashboard.html'?'':'<a class="main-menu-btn" href="dashboard.html">主選單</a>'}<div class="user-wrap"><button class="user-btn" id="userBtn"><span class="avatar">${esc(displayName[0]||'使')}</span><span class="user-text"><strong>${esc(displayName)}</strong><span>${esc(displayDepartment)} · ${esc(displayTitle)}</span></span>⌄</button><div class="user-menu" id="userMenu"><div class="user-card"><strong>${esc(displayName)}</strong><br>員工編號：${esc(displayEmployee)}<br>單位：${esc(displayDepartment)}<br>職稱：${esc(displayTitle)}</div><button class="menu-link" id="logoutBtn">登出</button></div></div></div></header>`}
-function renderShell(){const root=qs('#shell');if(!root)return;root.innerHTML=shell();qs('#userBtn').onclick=()=>qs('#userMenu').classList.toggle('open');qs('#logoutBtn').onclick=()=>{
-  sessionStorage.removeItem('meetingLoginUser');
-  sessionStorage.removeItem('meetingFlash');
-  sessionStorage.removeItem('meetingLoginUserProfileAt');
-  sessionStorage.removeItem('meetingLiffMeeting');
-  sessionStorage.removeItem('meetingLiffUser');
-  try{localStorage.removeItem('meetingLoginUser');localStorage.removeItem('meetingLiffUser')}catch{}
-  location.replace('./');
-}}
+function renderShell(){const root=qs('#shell');if(!root)return;root.innerHTML=shell();qs('#userBtn').onclick=()=>qs('#userMenu').classList.toggle('open');qs('#logoutBtn').onclick=logoutDesktop}
 async function refreshLoginUser(){
   const current=getUser();
   const employeeNo=(current.sntopid||current.employeeId||current.userID||'').trim();
@@ -175,7 +170,7 @@ function meetingCard(m,mode='sign'){
   const state=meetingAccessState(m);
   const stateTag=isMine?`<span class="tag ${state}">${{open:'進行中',pending:'尚未開始',closed:'已結束'}[state]}</span>`:'';
   const hosts=Array.isArray(m.hosts)&&m.hosts.length?m.hosts.join('、'):(m.host||'無');
-  const deleteButton=isMine&&canViewQr
+  const deleteButton=isMine&&m.canDelete
     ?`<button class="btn btn-outline meeting-quick-delete" type="button" data-delete-meeting="${esc(m.id)}" data-delete-name="${esc(m.name)}" aria-label="刪除 ${esc(m.name)}" title="刪除會議">🗑</button>`
     :'';
   return `<article class="meeting-card"><div><h3>${esc(m.name)}</h3><div class="meeting-meta"><span>📅 ${m.date} ${m.start}-${m.end}</span><span>📍 ${esc(m.location||'無')}</span><span>主持人：${esc(hosts)}</span></div><div class="tags">${stateTag}${m.relation==='host'?'':`<span class="tag ${m.relation}">${relationText}</span>`}</div></div><div class="meeting-card-actions"><a class="btn btn-primary" href="${href}">${buttonText}</a>${deleteButton}</div></article>`
@@ -196,9 +191,11 @@ function xlsxCell(ref,value,style=0){return `<c r="${ref}" t="inlineStr" s="${st
 //   固定名單會議：應到人數 = 參與名單人數，出席率 = 名單內實到 ÷ 名單人數。
 //   開放非名單人員加入：沒有應到人數與出席率，只統計實到人數。
 function attendanceSummary(m,rows){
-  const present=r=>!!(r.in||r.proxyEmployeeNo);
+  // 有簽到時間才算出席；資料庫不允許沒有簽到時間的出席紀錄。
+  const present=r=>!!r.in;
   if(m?.allowUnlistedParticipants)return {open:true,attended:rows.filter(present).length};
-  const listed=rows.filter(r=>r.participantType!=='External');
+  // 出席率的分母只算受邀者；現場加入的院內人員與訪客都不計入。
+  const listed=rows.filter(r=>r.source?r.source==='Invited':r.participantType!=='External');
   const attended=listed.filter(present).length,expected=listed.length;
   return {open:false,attended,expected,rate:expected?Math.round(attended/expected*100):0};
 }
@@ -233,6 +230,11 @@ async function apiJson(url, options={}){
   }
   requestOptions.headers=headers;
   const response=await fetch(url,requestOptions);
+  // 登入 cookie 逾時或不存在：電腦版頁面直接回到登入頁（登入頁本身的帳密錯誤不在此處理）。
+  if(response.status===401&&DESKTOP_PROTECTED_PAGES.has(currentPageName())){
+    clearDesktopSession();location.replace('./');
+    throw new Error('登入已逾時，請重新登入。');
+  }
   const contentType=(response.headers.get('content-type')||'').toLowerCase();
 
   if(!contentType.includes('application/json')){
@@ -263,15 +265,11 @@ function normalizeMeetingResult(value){return value?.meeting||value}
 
 // 90 分鐘閒置自動登出（所有登入後頁面共用）
 (function setupIdleLogout(){
-  if(!sessionStorage.getItem('meetingLoginUser'))return;
+  if(!DESKTOP_PROTECTED_PAGES.has(currentPageName())||!sessionStorage.getItem('meetingLoginUser'))return;
   const IDLE_MS=90*60*1000;
   const WARNING_MS=60*1000;
   let logoutTimer,warningTimer;
-  function clearLoginAndRedirect(){
-    sessionStorage.removeItem('meetingLoginUser');
-    sessionStorage.removeItem('meetingFlash');
-    location.replace('./');
-  }
+  function clearLoginAndRedirect(){logoutDesktop()}
   function showIdleWarning(){
     if(document.querySelector('#idleWarningOverlay'))return;
     const overlay=document.createElement('div');overlay.id='idleWarningOverlay';overlay.className='confirm-overlay';
