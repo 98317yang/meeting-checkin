@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>會議簽到名單</title>
-  <link rel="stylesheet" href="app.css?v=20261118-ui1">
+  <link rel="stylesheet" href="app.css?v=20261119-liff2">
   <style>
     .app-main{width:min(1600px,calc(100% - 28px));margin:22px auto 44px}
     .attendance-report{background:#fff;padding:24px;border-radius:16px;font-family:"Microsoft JhengHei","Noto Sans TC",Arial,sans-serif;overflow:hidden}
@@ -106,12 +106,16 @@
       </div>
     </section>
   </main>
-  <script src="app.js?v=20261118-ui1"></script>
+  <script src="app.js?v=20261119-liff2"></script>
   <script>
     initShell();
     const attendanceParams=new URLSearchParams(location.search);
     const meetingId=attendanceParams.get('id');
     const returnSource=(attendanceParams.get('from')||'').trim().toLowerCase();
+    // originals：載入時每一列的原始值。存檔時只送出有改過的列，並附上原始值，
+    // 讓後端確認這段期間沒有人改過（例如本人用手機簽到），避免用過期的畫面蓋掉新紀錄。
+    const rowSnapshot=r=>({in:r.in||'',out:r.out||'',operator:r.proxyEmployeeNo||'',note:r.note||''});
+    let originals=new Map();
     let meeting=null,rows=[],dirty=false,departments=[],usersByDepartment=new Map(),autoRefreshTimer=null,loadInFlight=false;
     back.href=meetingId?(returnSource==='qr'?`qr.html?id=${encodeURIComponent(meetingId)}&from=${encodeURIComponent(attendanceParams.get('qrFrom')||'today')}`:`meeting-detail.html?id=${encodeURIComponent(meetingId)}`):'my-meetings.html';
     back.textContent=returnSource==='qr'?'返回 QR Code':(meetingId?'返回會議資料':'返回我的會議');
@@ -122,10 +126,16 @@
     const timePicker=(value,kind)=>`<input class="time-input-inline" type="time" step="60" data-time-kind="${kind}" value="${esc(timeParts(value).hour?value:'')}" aria-label="${kind==='in'?'簽到時間':'簽退時間'}"><span class="print-time" data-print-kind="${kind}">${esc(value||'')}</span>`;
     const departmentOptions=selected=>`<option value="">不指定</option>${departments.map(d=>`<option value="${esc(d.departmentID)}"${d.departmentName===selected||d.departmentID===selected?' selected':''}>${esc(d.departmentName)}</option>`).join('')}`;
     async function getUsers(departmentId){if(!departmentId)return[];if(!usersByDepartment.has(departmentId))usersByDepartment.set(departmentId,apiJsonCached(`api/users?departmentId=${encodeURIComponent(departmentId)}`,{},300000));return await usersByDepartment.get(departmentId)}
+    // 標記為出席（選「出席」或指定代簽人）但還沒有簽到時間時，以現在時間作為簽到時間。
+    // 沒有簽到時間的出席紀錄存不進資料庫，不能只在畫面上顯示出席。
+    // 未出席原因只給沒來的人填；一標記出席就清空並鎖住（後端也會清掉）。
+    function lockAbsenceReason(tr,row,locked){row.note=locked?'':row.note;const input=tr.querySelector('input[data-k="note"]');if(input){input.disabled=locked;if(locked)input.value='';}}
+    function fillSignInIfMissing(tr,row){lockAbsenceReason(tr,row,true);if(row.in)return;const now=new Date();row.in=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;tr.querySelector('input[data-time-kind="in"]').value=row.in;tr.querySelector('[data-print-kind="in"]').textContent=row.in}
     async function proxyUserOptions(row,departmentId){const users=await getUsers(departmentId);return `<option value="">不指定</option>${users.map(u=>`<option value="${esc(u.userID)}"${u.userID===row.proxyEmployeeNo?' selected':''}>${esc(fullName(u.name,u.employeeId))}</option>`).join('')}`}
     function updateStats(){const s=attendanceSummary(meeting,rows);actual.textContent=s.attended;expectedStat.hidden=s.open;rateStat.hidden=s.open;openStat.hidden=!s.open;if(!s.open){expected.textContent=s.expected;rate.textContent=`${s.rate}%`}}
     function resetAttendanceRow(tr,row){
       row.in='';row.out='';row.attendanceStatus='未出席';row.proxyEmployeeNo='';row.proxyName='';row.proxyDepartment='';row.note='';
+      lockAbsenceReason(tr,row,false);const reason=tr.querySelector('input[data-k="note"]');if(reason)reason.placeholder='未出席原因';
       for(const kind of ['in','out']){
         const input=tr.querySelector(`input[data-time-kind="${kind}"]`);if(input)input.value='';const print=tr.querySelector(`[data-print-kind="${kind}"]`);if(print)print.textContent='';
       }
@@ -147,7 +157,7 @@
         <td><select class="attendance-status-select" data-status><option value="出席"${r.attendanceStatus==='出席'?' selected':''}>出席</option><option value="未出席"${r.attendanceStatus!=='出席'?' selected':''}>未出席</option></select><span class="print-cell-value" data-print-status>${esc(r.attendanceStatus||'未出席')}</span></td>
         <td><select data-proxy-department>${departmentOptions(r.proxyDepartment||'')}</select><span class="print-cell-value" data-print-proxy-department>${esc(r.proxyDepartment||'')}</span></td>
         <td><select data-proxy-user><option value="${esc(r.proxyEmployeeNo||'')}">${esc(r.proxyEmployeeNo?fullName(r.proxyName,r.proxyEmployeeNo):'不指定')}</option></select><span class="print-cell-value" data-print-proxy-user>${esc(r.proxyEmployeeNo?fullName(r.proxyName,r.proxyEmployeeNo):'')}</span></td>
-        <td><input data-k="note" value="${esc(r.note||'')}"></td>
+        <td><input data-k="note" value="${esc(r.note||'')}" placeholder="${r.in?'':'未出席原因'}"${r.in?' disabled':''}></td>
       </tr>`).join(''):'<tr><td colspan="9" class="readonly">此會議尚未設定參與人員。</td></tr>';
       const proxyRows=[...tbody.querySelectorAll('tr[data-i]')].map(tr=>{
         const index=Number(tr.dataset.i),row=rows[index];
@@ -163,10 +173,10 @@
         item.tr.querySelector('[data-proxy-user]').innerHTML=await proxyUserOptions(item.row,item.selectedDept.departmentID);
       }
       tbody.querySelectorAll('input[data-k]').forEach(el=>el.addEventListener('input',()=>{const index=Number(el.closest('tr').dataset.i);rows[index][el.dataset.k]=el.value;dirty=true}));
-      tbody.querySelectorAll('input[data-time-kind]').forEach(el=>el.addEventListener('change',()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index],kind=el.dataset.timeKind;const value=(el.value||'').slice(0,5);if(/^\d{2}:\d{2}$/.test(value)){row[kind]=value;tr.querySelector(`[data-print-kind="${kind}"]`).textContent=row[kind];if(kind==='in'){row.attendanceStatus='出席';tr.querySelector('[data-status]').value='出席';tr.querySelector('[data-print-status]').textContent='出席'}}else if(!value){row[kind]='';tr.querySelector(`[data-print-kind="${kind}"]`).textContent='';if(kind==='in')resetAttendanceRow(tr,row)}dirty=true;updateStats()}));
-      tbody.querySelectorAll('select[data-status]').forEach(el=>el.addEventListener('change',()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index];row.attendanceStatus=el.value;tr.querySelector('[data-print-status]').textContent=el.value;if(el.value==='未出席'){resetAttendanceRow(tr,row)}else if(!row.in){const now=new Date(),hour=String(now.getHours()).padStart(2,'0'),minute=String(now.getMinutes()).padStart(2,'0');row.in=`${hour}:${minute}`;tr.querySelector('input[data-time-kind="in"]').value=row.in;tr.querySelector('[data-print-kind="in"]').textContent=row.in}dirty=true;updateStats()}));
+      tbody.querySelectorAll('input[data-time-kind]').forEach(el=>el.addEventListener('change',()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index],kind=el.dataset.timeKind;const value=(el.value||'').slice(0,5);if(/^\d{2}:\d{2}$/.test(value)){row[kind]=value;tr.querySelector(`[data-print-kind="${kind}"]`).textContent=row[kind];if(kind==='in'){row.attendanceStatus='出席';tr.querySelector('[data-status]').value='出席';tr.querySelector('[data-print-status]').textContent='出席';lockAbsenceReason(tr,row,true)}}else if(!value){row[kind]='';tr.querySelector(`[data-print-kind="${kind}"]`).textContent='';if(kind==='in')resetAttendanceRow(tr,row)}dirty=true;updateStats()}));
+      tbody.querySelectorAll('select[data-status]').forEach(el=>el.addEventListener('change',()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index];row.attendanceStatus=el.value;tr.querySelector('[data-print-status]').textContent=el.value;if(el.value==='未出席'){resetAttendanceRow(tr,row)}else{fillSignInIfMissing(tr,row)}dirty=true;updateStats()}));
       tbody.querySelectorAll('[data-proxy-department]').forEach(el=>el.addEventListener('change',async()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index],dept=departments.find(d=>d.departmentID===el.value);row.proxyDepartment=dept?.departmentName||'';row.proxyEmployeeNo='';row.proxyName='';tr.querySelector('[data-proxy-user]').innerHTML=await proxyUserOptions(row,el.value);tr.querySelector('[data-print-proxy-department]').textContent=row.proxyDepartment;tr.querySelector('[data-print-proxy-user]').textContent='';dirty=true}));
-      tbody.querySelectorAll('[data-proxy-user]').forEach(el=>el.addEventListener('change',async()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index],deptId=tr.querySelector('[data-proxy-department]').value,users=await getUsers(deptId),user=users.find(u=>u.userID===el.value);row.proxyEmployeeNo=user?.userID||'';row.proxyName=user?.name||'';row.proxyDepartment=user?.dept||row.proxyDepartment||'';tr.querySelector('[data-print-proxy-user]').textContent=row.proxyEmployeeNo?fullName(row.proxyName,row.proxyEmployeeNo):'';if(row.proxyEmployeeNo){row.attendanceStatus='出席';tr.querySelector('[data-status]').value='出席';tr.querySelector('[data-print-status]').textContent='出席'}dirty=true}));
+      tbody.querySelectorAll('[data-proxy-user]').forEach(el=>el.addEventListener('change',async()=>{const tr=el.closest('tr'),index=Number(tr.dataset.i),row=rows[index],deptId=tr.querySelector('[data-proxy-department]').value,users=await getUsers(deptId),user=users.find(u=>u.userID===el.value);row.proxyEmployeeNo=user?.userID||'';row.proxyName=user?.name||'';row.proxyDepartment=user?.dept||row.proxyDepartment||'';tr.querySelector('[data-print-proxy-user]').textContent=row.proxyEmployeeNo?fullName(row.proxyName,row.proxyEmployeeNo):'';if(row.proxyEmployeeNo){row.attendanceStatus='出席';tr.querySelector('[data-status]').value='出席';tr.querySelector('[data-print-status]').textContent='出席';fillSignInIfMissing(tr,row)}dirty=true;updateStats()}));
       updateStats();
     }
     async function load({silent=false}={}){
@@ -175,7 +185,7 @@
       loadInFlight=true;
       try{
         const [result,depts]=await Promise.all([
-          apiJson(`api/meetings/${encodeURIComponent(meetingId)}/attendance?userId=${encodeURIComponent(currentUserID())}`),
+          apiJson(`api/meetings/${encodeURIComponent(meetingId)}/attendance`),
           departments.length?Promise.resolve(departments):apiJsonCached('api/departments',{},300000)
         ]);
         if(!result || typeof result!=='object' || !result.meeting){
@@ -183,6 +193,7 @@
         }
         meeting=result.meeting;
         rows=result.rows||[];
+        originals=new Map(rows.map(r=>[r.userID,rowSnapshot(r)]));
         departments=depts||[];
         title.textContent=meeting.name;
         subTitle.textContent=reportSubtitle(meeting);
@@ -201,7 +212,16 @@
         loadInFlight=false;
       }
     }
-    save.addEventListener('click',async()=>{save.disabled=true;try{await apiJson(`api/meetings/${encodeURIComponent(meetingId)}/attendance?userId=${encodeURIComponent(currentUserID())}`,{method:'PUT',body:JSON.stringify({rows:rows.map(r=>({userID:r.userID,in:r.in||null,out:r.out||null,operator:r.proxyEmployeeNo||'',note:r.note||''}))})});dirty=false;await showDialog('簽到名單已儲存',{type:'success'});await load()}catch(e){notifyError(e.message)}finally{save.disabled=false}});
+    save.addEventListener('click',async()=>{
+      const empty={in:'',out:'',operator:'',note:''};
+      const changed=rows.filter(r=>{const o=originals.get(r.userID)||empty,c=rowSnapshot(r);return c.in!==o.in||c.out!==o.out||c.operator!==o.operator||c.note!==o.note});
+      if(!changed.length){dirty=false;notifySuccess('沒有需要儲存的變更');return}
+      save.disabled=true;
+      try{
+        await apiJson(`api/meetings/${encodeURIComponent(meetingId)}/attendance`,{method:'PUT',body:JSON.stringify({rows:changed.map(r=>({userID:r.userID,in:r.in||null,out:r.out||null,operator:r.proxyEmployeeNo||'',note:r.note||'',original:originals.get(r.userID)||empty}))})});
+        dirty=false;await showDialog('簽到名單已儲存',{type:'success'});await load();
+      }catch(e){notifyError(e.message)}finally{save.disabled=false}
+    });
     excel.addEventListener('click',()=>meeting&&downloadExcel(rows,meeting));
     pdf.addEventListener('click',()=>window.print());
     window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});

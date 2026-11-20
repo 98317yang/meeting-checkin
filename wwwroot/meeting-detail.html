@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>會議資料</title>
-  <link rel="stylesheet" href="app.css?v=20261118-ui1">
+  <link rel="stylesheet" href="app.css?v=20261119-liff2">
   <style>
     .detail-page-title{margin-bottom:18px}
     .detail-page-title h1{font-size:clamp(1.9rem,3vw,2.45rem);margin-bottom:4px}
@@ -54,7 +54,7 @@
     <section id="content" class="panel"></section>
   </main>
 
-  <script src="app.js?v=20261118-ui1"></script>
+  <script src="app.js?v=20261119-liff2"></script>
   <script>
     initShell();
     const params=new URLSearchParams(location.search),id=params.get('id'),content=document.querySelector('#content');let meeting;
@@ -62,7 +62,7 @@
     const flash=sessionStorage.getItem('meetingFlash');if(flash){sessionStorage.removeItem('meetingFlash');setTimeout(()=>notifySuccess(flash),100)}
     const formatDate=value=>String(value||'').replaceAll('-','/');
     (async()=>{try{
-      const r=await apiJson(`api/meetings/${id}?userId=${encodeURIComponent(currentUserID())}`);
+      const r=await apiJson(`api/meetings/${id}`);
       meeting=r.meeting;
       title.textContent=meeting.name;
       sub.textContent=meeting.subName||'';
@@ -85,7 +85,7 @@
           <div class="detail-actions-primary">${isHost?primaryActions:''}</div>
           <div class="detail-actions-secondary">
             <a class="btn btn-light" href="${backTarget.href}">${backTarget.text}</a>
-            ${isHost?`<button class="btn btn-danger-outline" id="deleteMeeting">刪除會議</button>`:''}
+            ${meeting.canDelete?`<button class="btn btn-danger-outline" id="deleteMeeting">刪除會議</button>`:''}
           </div>
         </div>
         <section class="detail-summary">
@@ -103,7 +103,7 @@
         </section>
         ${note?`<div class="note-card"><span class="detail-label">會議說明／備註</span><span class="detail-value">${esc(note)}</span></div>`:''}`;
       if(isHost){
-        apiJson(`api/meetings/${encodeURIComponent(id)}/attendance?userId=${encodeURIComponent(currentUserID())}`).then(result=>{
+        apiJson(`api/meetings/${encodeURIComponent(id)}/attendance`).then(result=>{
           const s=attendanceSummary(meeting,result.rows||[]);
           document.querySelector("#attendanceSummaryBox").innerHTML=s.open
             ?`實到 <span class="attendance-value">${s.attended}</span><span class="attendance-unit">人</span>`
@@ -112,7 +112,7 @@
       }
       document.querySelector('#deleteMeeting')?.addEventListener('click',removeMeeting)
     }catch(e){title.textContent='找不到會議';sub.textContent=e.message;content.innerHTML='<a class="btn btn-light" href="my-meetings.html">返回我的會議</a>'}})();
-    async function removeMeeting(){if(!await showConfirm(`確定刪除「${meeting.name}」？`,{confirmText:'確定刪除'}))return;try{await apiJson(`api/meetings/${id}?userId=${encodeURIComponent(currentUserID())}`,{method:'DELETE'});sessionStorage.setItem('meetingFlash','會議已刪除');location.href='my-meetings.html'}catch(e){notifyError(e.message)}}
+    async function removeMeeting(){if(!await showConfirm(`確定刪除「${meeting.name}」？`,{confirmText:'確定刪除'}))return;try{await apiJson(`api/meetings/${id}`,{method:'DELETE'});sessionStorage.setItem('meetingFlash','會議已刪除');location.href='my-meetings.html'}catch(e){notifyError(e.message)}}
   </script>
 </body>
 </html>
