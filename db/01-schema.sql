@@ -208,13 +208,16 @@ GO
 
 -- 系統時間一律用台北時間，不受主機時區影響（部署到 UTC 的雲端主機也一樣）。
 -- 程式端的 AppClock 用同一個時區，判斷簽到時間窗與寫入時間才不會差 8 小時。
-CREATE OR ALTER FUNCTION dbo.AppNow()
+-- 只在不存在時建立：資料表的預設值會參照這個函式，之後無法再 ALTER，
+-- 所以不能用 CREATE OR ALTER，否則重複執行腳本時會失敗。
+IF OBJECT_ID(N'dbo.AppNow', N'FN') IS NULL
+    EXEC(N'CREATE FUNCTION dbo.AppNow()
 RETURNS DATETIME2(0)
 WITH SCHEMABINDING
 AS
 BEGIN
-    RETURN CONVERT(DATETIME2(0), SYSDATETIMEOFFSET() AT TIME ZONE N'Taipei Standard Time');
-END
+    RETURN CONVERT(DATETIME2(0), SYSDATETIMEOFFSET() AT TIME ZONE N''Taipei Standard Time'');
+END');
 GO
 
 IF OBJECT_ID(N'dbo.RoomInfo', N'U') IS NULL
