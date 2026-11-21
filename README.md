@@ -9,7 +9,7 @@
 | ![主選單](docs/screenshots/dashboard.png) | ![我的會議](docs/screenshots/my-meetings.png) |
 | 主選單 | 我的會議 |
 | ![會議資料](docs/screenshots/meeting-detail.png) | ![會議 QR Code](docs/screenshots/qr-code.png) |
-| 會議資料與出席狀況 | 會議 QR Code（已結束時自動停用） |
+| 會議資料與出席狀況 | 會議 QR Code（外流時可重新產生，舊碼立即失效） |
 | ![簽到名單](docs/screenshots/attendance.png) | ![發起會議](docs/screenshots/create-meeting.png) |
 | 簽到名單與匯出 | 發起會議：跨單位搜尋參與人員 |
 
