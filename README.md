@@ -115,6 +115,64 @@ flowchart LR
 | LineMeeting | `MeetingAttendanceLog` | 簽到紀錄修改歷程（由觸發程序寫入，程式帳號不能改） |
 | LineMeeting | `RoomInfo` | 會議室 |
 
+```mermaid
+erDiagram
+    UserInfo ||--o{ LoginAccount : "登入帳號"
+    UserInfo ||..o{ MeetingParticipant : "員工編號（跨資料庫）"
+    RoomInfo |o--o{ Meeting : "會議地點"
+    Meeting ||--o{ MeetingParticipant : "參與名單"
+    MeetingParticipant ||--o| MeetingAttendance : "簽到紀錄"
+    MeetingParticipant ||..o{ MeetingAttendanceLog : "修改歷程（觸發程序寫入）"
+
+    UserInfo {
+        string SNTOPID PK "員工編號"
+        string CNM "姓名"
+        string DPID "單位"
+        string UserID UK "LINE 使用者代號"
+    }
+    LoginAccount {
+        string Account PK
+        string SNTOPID FK
+        binary PasswordHash "加鹽雜湊"
+    }
+    RoomInfo {
+        string RoomID PK
+        string RoomName
+    }
+    Meeting {
+        string MeetingNo PK "會議編號"
+        string RoomID FK
+        datetime StartDateTime
+        datetime EndDateTime
+        string QRCode UK
+        bit AllowUnlistedParticipants "是否開放加入"
+        rowversion RowVer "防止同時編輯互相覆蓋"
+    }
+    MeetingParticipant {
+        int ParticipantID PK
+        string MeetingNo FK
+        tinyint ParticipantType "院內人員／訪客"
+        string EmployeeNo "院內人員"
+        string GuestKey "訪客"
+        string AbsenceReason "未出席原因"
+    }
+    MeetingAttendance {
+        int ParticipantID PK, FK
+        datetime SignInTime
+        datetime SignOutTime
+        string ProxySignEmployeeNo "代簽人"
+    }
+    MeetingAttendanceLog {
+        bigint LogID PK
+        int ParticipantID
+        char Action "新增／修改／刪除"
+        string ChangedByEmployeeNo "操作者"
+        string ChangeSource "簽到單／手機／代簽"
+    }
+```
+
+實線為外鍵；虛線為跨資料庫（員工資料在 LineDB）或由觸發程序維護的關聯。
+
 **安全性設計**
 - 所有 SQL 皆使用參數化查詢，防止 SQL Injection
 - 簽到紀錄的新增、修改、刪除都由觸發程序寫入修改歷程，記錄操作者與來源（簽到單／手機／代簽）；應用程式帳號對歷程表沒有寫入權限
@@ -199,11 +257,16 @@ docker exec meeting-checkin-db /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U 
 ├── Contracts/Requests.cs      # API 請求格式
 ├── tests/MeetingCheckin.Tests # xUnit 單元測試
 ├── .github/workflows/ci.yml   # GitHub Actions
+├── .prettierrc                # 前端程式碼格式設定
 ├── docker-compose.yml         # SQL Server + 初始化
 ├── db/
 │   ├── 01-schema.sql          # 資料庫、資料表、觸發程序、最小權限帳號
 │   └── 02-seed.sql            # 示範資料（可重複執行）
-└── wwwroot/                   # 前端頁面（登入、主選單、會議、QR Code、簽到名單、手機簽到）
+└── wwwroot/                   # 前端（原生 HTML / CSS / JavaScript）
+    ├── *.html                 #   登入、主選單、會議、QR Code、簽到名單、手機簽到等頁面
+    ├── js/                    #   各頁面的程式（app.js 為共用功能）
+    ├── css/                   #   app.css（系統頁面）、login.css（登入頁）
+    └── assets/                #   標誌圖檔
 ```
 
 ## 公開版本的延伸

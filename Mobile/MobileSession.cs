@@ -13,7 +13,7 @@ internal static class MobileSession
         string? externalOrganization = null,
         string? externalTitle = null)
     {
-        var protector = dataProtectionProvider.CreateProtector("MeetingLogin.MobileMeetingSession.v2");
+        var protector = dataProtectionProvider.CreateProtector("MeetingCheckin.MobileSession");
 
         // 這裡只是上限，避免憑證永久有效。實際能不能用，每次都由 CheckMobileSessionAsync
         // 依資料庫裡「目前」的會議結束時間判斷，所以主持人延長會議時不用重新掃碼。
@@ -47,7 +47,7 @@ internal static class MobileSession
 
         try
         {
-            var protector = dataProtectionProvider.CreateProtector("MeetingLogin.MobileMeetingSession.v2");
+            var protector = dataProtectionProvider.CreateProtector("MeetingCheckin.MobileSession");
             var json = protector.Unprotect(protectedValue);
             payload = JsonSerializer.Deserialize<MobileMeetingSessionPayload>(json);
 

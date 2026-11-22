@@ -100,16 +100,23 @@ internal static class RequestContext
         return (computerNameMatched, ipAddress, computerName, "remoteConnection");
     }
 
+    private static readonly HashSet<string> ExternalStaticFiles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/liff-entry.html",
+        "/mobile-checkin.html",
+        "/css/app.css",
+        "/js/app.js",
+        "/js/liff-entry.js",
+        "/js/mobile-checkin.js",
+    };
+
     internal static bool IsExternalAllowedPath(PathString path)
     {
         var value = path.Value ?? "";
 
         // 外網只提供 LINE / LIFF 手機簽到流程與必要靜態資源。
-        if (value.Equals("/liff-entry.html", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("/mobile-checkin.html", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("/app.css", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("/app.js", StringComparison.OrdinalIgnoreCase)
-            || value.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase))
+        // 只開放手機簽到用到的頁面與檔案；電腦端頁面的 JS 不在清單內。
+        if (ExternalStaticFiles.Contains(value) || value.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase))
             return true;
 
         if (value.Equals("/api/liff/meeting/authorize", StringComparison.OrdinalIgnoreCase))

@@ -13,7 +13,7 @@
   --radius-lg: 20px;
   --radius-md: 12px;
   --transition: 180ms ease;
-  --site-font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", Arial, sans-serif;
+  --site-font: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', Arial, sans-serif;
 }
 
 * {
@@ -144,7 +144,12 @@ a {
   inset: 0;
   z-index: -1;
   background:
-    linear-gradient(to top, rgba(34, 18, 18, 0.72) 0%, rgba(34, 18, 18, 0.15) 48%, rgba(34, 18, 18, 0.03) 72%),
+    linear-gradient(
+      to top,
+      rgba(34, 18, 18, 0.72) 0%,
+      rgba(34, 18, 18, 0.15) 48%,
+      rgba(34, 18, 18, 0.03) 72%
+    ),
     linear-gradient(110deg, rgba(112, 21, 28, 0.24), transparent 58%);
 }
 
@@ -252,7 +257,10 @@ a {
   background: #fff;
   border: 1px solid #d9d2cd;
   border-radius: var(--radius-md);
-  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition),
+    background var(--transition);
 }
 
 .input-wrap:focus-within {
@@ -304,7 +312,9 @@ a {
   border: 0;
   border-radius: 50%;
   cursor: pointer;
-  transition: color var(--transition), background var(--transition);
+  transition:
+    color var(--transition),
+    background var(--transition);
 }
 
 .password-toggle:hover,
@@ -360,7 +370,10 @@ a {
   font-size: 0.96rem;
   font-weight: 700;
   letter-spacing: 0.08em;
-  transition: transform var(--transition), box-shadow var(--transition), filter var(--transition);
+  transition:
+    transform var(--transition),
+    box-shadow var(--transition),
+    filter var(--transition);
 }
 
 .login-button:hover {

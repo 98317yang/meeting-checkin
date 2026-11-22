@@ -5,7 +5,7 @@
     minuteStep: 5,
     title: '選擇時間',
     cancelText: '取消',
-    confirmText: '確定'
+    confirmText: '確定',
   };
 
   function pad(value) {
@@ -58,14 +58,16 @@
 
     bindTriggers() {
       if (!this.input.id) return;
-      document.querySelectorAll(`[data-time-target="${CSS.escape(this.input.id)}"]`).forEach((button) => {
-        if (button.dataset.timePickerBound === '1') return;
-        button.dataset.timePickerBound = '1';
-        button.addEventListener('click', (event) => {
-          event.preventDefault();
-          this.open();
+      document
+        .querySelectorAll(`[data-time-target="${CSS.escape(this.input.id)}"]`)
+        .forEach((button) => {
+          if (button.dataset.timePickerBound === '1') return;
+          button.dataset.timePickerBound = '1';
+          button.addEventListener('click', (event) => {
+            event.preventDefault();
+            this.open();
+          });
         });
-      });
     }
 
     open() {
@@ -174,19 +176,26 @@
 
       const numbers = this.dialog.querySelector('.mtp-numbers');
       numbers.innerHTML = '';
-      const values = this.stage === 'hour'
-        ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0]
-        : Array.from({ length: 12 }, (_, index) => index * this.options.minuteStep);
+      const values =
+        this.stage === 'hour'
+          ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0]
+          : Array.from({ length: 12 }, (_, index) => index * this.options.minuteStep);
 
       values.forEach((value, index) => {
         const isHour = this.stage === 'hour';
         const inner = isHour && (value === 0 || value >= 13);
         const dialIndex = isHour
-          ? (value === 0 ? 12 : value > 12 ? value - 12 : value)
-          : (index === 0 ? 12 : index);
+          ? value === 0
+            ? 12
+            : value > 12
+              ? value - 12
+              : value
+          : index === 0
+            ? 12
+            : index;
         const angle = dialIndex * 30;
         const radius = inner ? 72 : 112;
-        const radian = (angle - 90) * Math.PI / 180;
+        const radian = ((angle - 90) * Math.PI) / 180;
         const x = 140 + radius * Math.cos(radian);
         const y = 140 + radius * Math.sin(radian);
         const selected = isHour ? value === this.hour : value === this.minute;
@@ -212,16 +221,17 @@
 
       const selectedValue = this.stage === 'hour' ? this.hour : this.minute;
       const isInner = this.stage === 'hour' && (selectedValue === 0 || selectedValue >= 13);
-      const angle = this.stage === 'hour'
-        ? (selectedValue === 0 ? 12 : selectedValue > 12 ? selectedValue - 12 : selectedValue) * 30
-        : ((selectedValue / this.options.minuteStep) * 30 || 360);
+      const angle =
+        this.stage === 'hour'
+          ? (selectedValue === 0 ? 12 : selectedValue > 12 ? selectedValue - 12 : selectedValue) *
+            30
+          : (selectedValue / this.options.minuteStep) * 30 || 360;
       const hand = this.dialog.querySelector('.mtp-hand');
       hand.style.height = `${isInner ? 72 : 112}px`;
       hand.style.transform = `rotate(${angle === 360 ? 0 : angle}deg)`;
-      this.dialog.querySelector('.mtp-clock').setAttribute(
-        'aria-label',
-        this.stage === 'hour' ? '請選擇小時' : '請選擇分鐘'
-      );
+      this.dialog
+        .querySelector('.mtp-clock')
+        .setAttribute('aria-label', this.stage === 'hour' ? '請選擇小時' : '請選擇分鐘');
     }
 
     destroy() {
@@ -238,7 +248,7 @@
         element.__materialTimePicker.options = Object.assign(
           {},
           element.__materialTimePicker.options,
-          options || {}
+          options || {},
         );
         element.__materialTimePicker.bindTriggers();
         return element.__materialTimePicker;
@@ -253,7 +263,7 @@
     document.querySelectorAll('[data-material-timepicker]').forEach((input) => {
       MaterialTimePicker.attach(input, {
         minuteStep: Number(input.dataset.minuteStep || 5),
-        title: input.dataset.timeTitle || DEFAULTS.title
+        title: input.dataset.timeTitle || DEFAULTS.title,
       });
     });
   }

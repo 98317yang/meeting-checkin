@@ -14,7 +14,7 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - name: Build
-        run: dotnet build MeetingLogin.Api.csproj -c Release
+        run: dotnet build MeetingCheckin.Api.csproj -c Release
       - name: Unit tests
         run: dotnet test tests/MeetingCheckin.Tests -c Release --logger "console;verbosity=normal"
 

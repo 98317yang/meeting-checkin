@@ -40,3 +40,30 @@ public class RequestContextTests
         Assert.Equal("10001", RequestContext.CurrentEmployeeNo(principal));
     }
 }
+
+// 院外網路只能存取手機簽到流程用到的頁面、檔案與 API。
+public class ExternalAccessTests
+{
+    [Theory]
+    [InlineData("/mobile-checkin.html")]
+    [InlineData("/liff-entry.html")]
+    [InlineData("/js/app.js")]
+    [InlineData("/js/mobile-checkin.js")]
+    [InlineData("/js/liff-entry.js")]
+    [InlineData("/css/app.css")]
+    [InlineData("/assets/logo.svg")]
+    [InlineData("/api/meetings/by-token/M-abc")]
+    [InlineData("/api/meetings/2026110001/my-attendance")]
+    public void MobileCheckInFiles_AreReachableFromOutside(string path) =>
+        Assert.True(RequestContext.IsExternalAllowedPath(new Microsoft.AspNetCore.Http.PathString(path)));
+
+    [Theory]
+    [InlineData("/dashboard.html")]
+    [InlineData("/attendance.html")]
+    [InlineData("/js/attendance.js")]
+    [InlineData("/js/create-meeting.js")]
+    [InlineData("/api/meetings")]
+    [InlineData("/api/meetings/2026110001/attendance")]
+    public void DesktopPagesAndApis_AreNotReachableFromOutside(string path) =>
+        Assert.False(RequestContext.IsExternalAllowedPath(new Microsoft.AspNetCore.Http.PathString(path)));
+}
