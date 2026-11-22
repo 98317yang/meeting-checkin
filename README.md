@@ -6,6 +6,11 @@
 
 > 本專案源自我在醫院資訊室實習期間（2026 年 7–8 月）**獨立開發**的系統，從需求訪談、資料庫串接、前後端實作、LINE 整合到全院操作手冊皆由我一人完成。經院方同意後，以去識別化版本公開：已移除醫院名稱、標誌、內網設定與所有連線資訊，並以模擬資料庫取代院內 HIS 資料庫，讓專案可以在任何電腦上執行。
 
+> **English summary** — A meeting check-in system for hospital staff, which I built independently during my IT internship at a hospital (July–August 2026), from requirements gathering to the user manual. It is published here as a de-identified version with the hospital's approval.
+> Hosts create meetings and project a QR Code from the desktop interface; attendees scan it with LINE to sign in and out, sign in on behalf of colleagues, or register as guests at open meetings, and hosts export the attendance sheet to Excel or PDF.
+> Built with ASP.NET Core 8 Minimal API, SQL Server and vanilla JavaScript, with LINE LIFF for mobile identity.
+> Serializable transactions and rowversion checks keep concurrent edits safe, a trigger-based audit trail records every attendance change, and the business rules are covered by xUnit tests that run in GitHub Actions.
+
 **技術重點**
 - ASP.NET Core 8 Minimal API、SQL Server、原生 JavaScript，手機端以 LINE LIFF 驗證身分
 - 交易與並行控制：Serializable 交易產生編號、rowversion 防止同時編輯互相覆蓋，簽到紀錄由觸發程序保留修改歷程
