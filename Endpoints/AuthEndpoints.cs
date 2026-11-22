@@ -222,11 +222,13 @@ internal static class AuthEndpoints
             }
             catch (Exception ex)
             {
+                // 錯誤細節只寫入伺服器紀錄；登入 API 不需登入，回應裡不能帶資料庫的錯誤原文。
+                httpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("Login").LogError(ex, "Login failed with an unexpected error.");
                 return Results.Json(new
                 {
                     success = false,
-                    message = "登入處理發生錯誤，請洽資訊室。",
-                    detail = ex.Message
+                    message = "登入處理發生錯誤，請洽資訊室。"
                 }, statusCode: 500);
             }
         }).AllowAnonymous();

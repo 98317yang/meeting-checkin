@@ -56,9 +56,16 @@ internal static class Db
             // 547：違反外來鍵或 CHECK 約束，代表資料已被別人修改，或送來的內容不符合規則。
             if (sqlException.Number == 547)
                 return "資料不符合系統規則，可能已被其他人修改，請重新整理後再試。";
+
+            // 其他資料庫錯誤（連線失敗、逾時等）的原文含有伺服器資訊，不回傳給使用者。
+            return "系統暫時無法處理，請稍後再試。";
         }
 
-        return exception.Message;
+        // 程式自己拋出的業務規則訊息（例如「已有人簽到，不能修改會議日期」）可以直接顯示；
+        // 其他例外的原文可能含有內部資訊，一律改成通用訊息。
+        return exception is InvalidOperationException or ArgumentException
+            ? exception.Message
+            : "系統暫時無法處理，請稍後再試。";
     }
 
     internal static (string IdColumn, string NameColumn)? cachedRoomInfoColumns = null;
