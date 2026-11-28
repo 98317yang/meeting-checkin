@@ -38,7 +38,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     // 正式流程中，手機憑證是 LINE 驗證身分後由系統簽發；測試環境無法登入 LINE，
     // 因此直接用系統自己的簽發函式產生，之後的簽到、檢查、寫入流程都和正式環境相同。
     public string IssueMobileSession(string employeeNo, string meetingNo, string meetingToken, DateTime meetingEnd) =>
-        MobileSession.CreateMobileMeetingSession(
+        MobileSession.CreateMobileSession(
             Services.GetRequiredService<IDataProtectionProvider>(), 1, employeeNo, meetingNo, meetingToken, meetingEnd);
 
     public string LineMeetingConnectionString =>
@@ -71,9 +71,9 @@ public static class Api
 
     // 建立一場「現在正在進行」的會議（台北時間，不跨日），回傳會議編號、QR token 與結束時間。
     public static async Task<(string MeetingNo, string Token, DateTime End)> CreateMeetingAsync(
-        HttpClient client, string name, string[] participants, bool allowUnlisted = false)
+        HttpClient client, string name, string[] participants, bool walkIn = false)
     {
-        var now = AppClock.Now;
+        var now = TaipeiTime.Now;
         var start = now.AddMinutes(-10) < now.Date ? now.Date : now.AddMinutes(-10);
         var end = now.AddMinutes(50) >= now.Date.AddDays(1) ? now.Date.AddHours(23).AddMinutes(59) : now.AddMinutes(50);
         var response = await client.PostAsJsonAsync("/api/meetings", new
@@ -87,7 +87,7 @@ public static class Api
             host1UserID = "10001",
             note = "",
             participantUserIDs = participants,
-            allowUnlistedParticipants = allowUnlisted,
+            allowWalkIn = walkIn,
         });
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(response.StatusCode == HttpStatusCode.OK, body.ToString());

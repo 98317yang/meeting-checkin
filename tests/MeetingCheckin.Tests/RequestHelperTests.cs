@@ -5,7 +5,7 @@ namespace MeetingCheckin.Tests;
 
 // 開發用端點與院內電腦判斷都依賴「是否為本機直接連線」。
 // ngrok 等轉發工具的連線來源也是本機，必須靠轉發標頭與 Host 分辨。
-public class RequestContextTests
+public class RequestHelperTests
 {
     private static HttpContext Request(string ip, string host, string? forwardedFor = null)
     {
@@ -18,26 +18,26 @@ public class RequestContextTests
 
     [Fact]
     public void Localhost_IsDirectLocal() =>
-        Assert.True(RequestContext.IsDirectLocalRequest(Request("127.0.0.1", "localhost:5080")));
+        Assert.True(RequestHelper.IsLocalRequest(Request("127.0.0.1", "localhost:5080")));
 
     [Fact]
     public void Tunnel_ForwardedThroughLoopback_IsNotLocal() =>
-        Assert.False(RequestContext.IsDirectLocalRequest(Request("127.0.0.1", "abc.ngrok-free.app", "203.0.113.5")));
+        Assert.False(RequestHelper.IsLocalRequest(Request("127.0.0.1", "abc.ngrok-free.app", "203.0.113.5")));
 
     [Fact]
     public void LoopbackWithPublicHostName_IsNotLocal() =>
-        Assert.False(RequestContext.IsDirectLocalRequest(Request("127.0.0.1", "abc.ngrok-free.app")));
+        Assert.False(RequestHelper.IsLocalRequest(Request("127.0.0.1", "abc.ngrok-free.app")));
 
     [Fact]
     public void OtherMachine_IsNotLocal() =>
-        Assert.False(RequestContext.IsDirectLocalRequest(Request("192.168.1.20", "localhost:5080")));
+        Assert.False(RequestHelper.IsLocalRequest(Request("192.168.1.20", "localhost:5080")));
 
     [Fact]
     public void EmployeeNo_ComesFromLoginCookieClaim()
     {
         var principal = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
-            [new System.Security.Claims.Claim(RequestContext.EmployeeNoClaim, " 10001 ")], "Test"));
-        Assert.Equal("10001", RequestContext.CurrentEmployeeNo(principal));
+            [new System.Security.Claims.Claim(RequestHelper.EmployeeNoClaim, " 10001 ")], "Test"));
+        Assert.Equal("10001", RequestHelper.GetUserId(principal));
     }
 }
 
@@ -55,7 +55,7 @@ public class ExternalAccessTests
     [InlineData("/api/meetings/by-token/M-abc")]
     [InlineData("/api/meetings/2026110001/my-attendance")]
     public void MobileCheckInFiles_AreReachableFromOutside(string path) =>
-        Assert.True(RequestContext.IsExternalAllowedPath(new Microsoft.AspNetCore.Http.PathString(path)));
+        Assert.True(RequestHelper.IsPublicPath(new Microsoft.AspNetCore.Http.PathString(path)));
 
     [Theory]
     [InlineData("/dashboard.html")]
@@ -65,5 +65,5 @@ public class ExternalAccessTests
     [InlineData("/api/meetings")]
     [InlineData("/api/meetings/2026110001/attendance")]
     public void DesktopPagesAndApis_AreNotReachableFromOutside(string path) =>
-        Assert.False(RequestContext.IsExternalAllowedPath(new Microsoft.AspNetCore.Http.PathString(path)));
+        Assert.False(RequestHelper.IsPublicPath(new Microsoft.AspNetCore.Http.PathString(path)));
 }

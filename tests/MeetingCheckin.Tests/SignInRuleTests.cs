@@ -1,14 +1,14 @@
 namespace MeetingCheckin.Tests;
 
-public class CheckInRulesTests
+public class SignInRuleTests
 {
     private static readonly DateTime Start = new(2026, 11, 20, 14, 0, 0);
     private static readonly DateTime End = new(2026, 11, 20, 15, 0, 0);
 
-    public CheckInRulesTests()
+    public SignInRuleTests()
     {
-        CheckInRules.OpenMinutesBeforeStart = 15;
-        CheckInRules.CloseMinutesAfterEnd = 30;
+        SignInRule.OpenMinutesBeforeStart = 15;
+        SignInRule.CloseMinutesAfterEnd = 30;
     }
 
     [Theory]
@@ -19,7 +19,7 @@ public class CheckInRulesTests
     [InlineData("15:01", false)]   // 結束後不能再簽到
     public void SignIn_IsAllowedFromOpenTimeUntilEnd(string now, bool allowed)
     {
-        var problem = CheckInRules.CheckWindow("signin", Start, End, At(now));
+        var problem = SignInRule.CheckTime("signin", Start, End, At(now));
         Assert.Equal(allowed, problem is null);
     }
 
@@ -29,14 +29,14 @@ public class CheckInRulesTests
     [InlineData("15:31", false)]
     public void SignOut_IsAllowedUntilCloseMinutesAfterEnd(string now, bool allowed)
     {
-        var problem = CheckInRules.CheckWindow("signout", Start, End, At(now));
+        var problem = SignInRule.CheckTime("signout", Start, End, At(now));
         Assert.Equal(allowed, problem is null);
     }
 
     [Fact]
     public void Messages_TellWhenSignInOpens()
     {
-        Assert.Equal("本會議將於 2026/11/20 13:45 開放簽到。", CheckInRules.CheckWindow("signin", Start, End, At("09:00")));
+        Assert.Equal("本會議將於 2026/11/20 13:45 開放簽到。", SignInRule.CheckTime("signin", Start, End, At("09:00")));
     }
 
     private static DateTime At(string hhmm) => Start.Date.Add(TimeSpan.Parse(hhmm));

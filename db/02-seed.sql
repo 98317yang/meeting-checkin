@@ -186,7 +186,7 @@ GO
 --   4) yesterday, finished, open -> one invited employee, one walk-in employee and one guest
 IF NOT EXISTS (SELECT 1 FROM dbo.Meeting)
 BEGIN
-    DECLARE @Now      DATETIME2(0) = dbo.AppNow();
+    DECLARE @Now      DATETIME2(0) = dbo.fn_Now();
     DECLARE @Today    DATETIME2(0) = DATEADD(MINUTE, -60, @Now);
     DECLARE @Yday     DATETIME2(0) = DATEADD(HOUR, 14, CAST(CAST(DATEADD(DAY, -1, @Now) AS DATE) AS DATETIME2(0)));
     DECLARE @NextWeek DATETIME2(0) = DATEADD(HOUR, 10, CAST(CAST(DATEADD(DAY, 7, @Now) AS DATE) AS DATETIME2(0)));
@@ -200,9 +200,9 @@ BEGIN
     DECLARE @M4 VARCHAR(20) = CONVERT(CHAR(6), @Yday2, 112) + '0004';
 
     INSERT dbo.Meeting
-        (MeetingNo, MeetingName, MeetingSubName, StartDateTime, EndDateTime,
-         LocationType, RoomID, CustomLocation, Host1EmployeeNo, Host2EmployeeNo, Host3EmployeeNo,
-         QRCode, Description, AllowUnlistedParticipants, ExpectedParticipantCount, CreatedByEmployeeNo)
+        (MeetingNo, MeetingName, MeetingSubName, StartTime, EndTime,
+         LocationType, RoomID, CustomLocation, Host1, Host2, Host3,
+         QRCode, Description, AllowWalkIn, ExpectedCount, CreateUser)
     VALUES
         (@M1, N'資訊安全教育訓練', N'第 3 次', @Today, DATEADD(HOUR, 2, @Today),
          1, N'R201', NULL, '10001', '10002', NULL,
@@ -222,8 +222,8 @@ BEGIN
          N'示範資料：已結束的開放式會議，有名單外人員與訪客簽到，不計算出席率。', 1, 0, '10001');
 
     -- Invited participants (Source = 1); hosts are always on their own meeting's list.
-    INSERT dbo.MeetingParticipant (MeetingNo, ParticipantType, Source, EmployeeNo, CreatedByEmployeeNo)
-    SELECT m.MeetingNo, 1, 1, p.EmployeeNo, m.CreatedByEmployeeNo
+    INSERT dbo.MeetingParticipant (MeetingNo, ParticipantType, Source, EmployeeNo, CreateUser)
+    SELECT m.MeetingNo, 1, 1, p.EmployeeNo, m.CreateUser
     FROM (VALUES
             (@M1, '10001'), (@M1, '10002'), (@M1, '20001'), (@M1, '20002'), (@M1, '30001'), (@M1, '40001'),
             (@M2, '10001'), (@M2, '20001'), (@M2, '30001'), (@M2, '40002'), (@M2, '50001'),
@@ -237,12 +237,12 @@ BEGIN
     WHERE MeetingNo = @M2 AND EmployeeNo = '40002';
 
     -- Open meeting: an employee who was not invited and joined on the spot (Source = 2) ...
-    INSERT dbo.MeetingParticipant (MeetingNo, ParticipantType, Source, EmployeeNo, CreatedByEmployeeNo, CreatedTime)
+    INSERT dbo.MeetingParticipant (MeetingNo, ParticipantType, Source, EmployeeNo, CreateUser, CreateTime)
     VALUES (@M4, 1, 2, '60002', '60002', DATEADD(MINUTE, 5, @Yday2));
 
     -- ... and a guest who registered with their LINE account (Source = 3).
     INSERT dbo.MeetingParticipant
-        (MeetingNo, ParticipantType, Source, GuestKey, ExternalName, ExternalOrganization, ExternalTitle, CreatedTime)
+        (MeetingNo, ParticipantType, Source, GuestKey, GuestName, GuestOrg, GuestTitle, CreateTime)
     VALUES (@M4, 2, 3, 'G0000000000000demo1', N'趙子琳', N'示範顧問公司', N'顧問', DATEADD(MINUTE, 1, @Yday2));
 
     -- Sign-in records point at a participant row, never at a name.
@@ -250,8 +250,8 @@ BEGIN
     -- Yesterday (open meeting): the host, the walk-in and the guest attended; 60001 was absent.
     -- Today: two people have already signed in.
     INSERT dbo.MeetingAttendance
-        (ParticipantID, SignInTime, SignOutTime, ProxySignEmployeeNo, UpdatedByEmployeeNo, UpdatedTime)
-    SELECT p.ParticipantID, v.SignInTime, v.SignOutTime, v.Proxy, v.UpdatedBy, v.SignInTime
+        (ParticipantID, SignInTime, SignOutTime, ProxyUser, UpdateUser, UpdateTime)
+    SELECT p.ParticipantID, v.SignInTime, v.SignOutTime, v.Proxy, v.UpdateUser, v.SignInTime
     FROM (VALUES
             (@M2, '10001', NULL, DATEADD(MINUTE, -5, @Yday),  DATEADD(MINUTE, 92, @Yday),  NULL,    '10001'),
             (@M2, '20001', NULL, DATEADD(MINUTE, -2, @Yday),  DATEADD(MINUTE, 91, @Yday),  NULL,    '20001'),
@@ -263,7 +263,7 @@ BEGIN
                                  DATEADD(MINUTE,  2, @Yday2), DATEADD(MINUTE, 58, @Yday2), NULL,    NULL),
             (@M1, '10002', NULL, DATEADD(MINUTE,  2, @Today), NULL,                        NULL,    '10002'),
             (@M1, '20001', NULL, DATEADD(MINUTE,  5, @Today), NULL,                        NULL,    '20001')
-         ) AS v (MeetingNo, EmployeeNo, GuestKey, SignInTime, SignOutTime, Proxy, UpdatedBy)
+         ) AS v (MeetingNo, EmployeeNo, GuestKey, SignInTime, SignOutTime, Proxy, UpdateUser)
     JOIN dbo.MeetingParticipant AS p
       ON p.MeetingNo = v.MeetingNo
      AND (p.EmployeeNo = v.EmployeeNo OR p.GuestKey = v.GuestKey);

@@ -10,7 +10,7 @@ function meetingSection(title, items, emptyText) {
     const groups = { open: [], pending: [], closed: [] };
     data
       .sort((a, b) => String(a.start).localeCompare(String(b.start)))
-      .forEach((m) => groups[meetingAccessState(m)].push(m));
+      .forEach((m) => groups[getAccess(m)].push(m));
     list.innerHTML = data.length
       ? [
           ['進行中', groups.open],

@@ -11,10 +11,10 @@ const participantChecklist = document.querySelector('#participantChecklist');
 const participantDept = document.querySelector('#participantDept');
 const selectedPeople = document.querySelector('#selectedPeople');
 const selectedCount = document.querySelector('#selectedCount');
-const allowUnlisted = document.querySelector('#allowUnlistedParticipants');
+const walkIn = document.querySelector('#allowWalkIn');
 const departmentOptions = document.querySelector('#departmentOptions');
 const meetingNote = document.querySelector('#meetingNote');
-let endTimeManuallyChanged = false;
+let endTimeEdited = false;
 let departments = [];
 let existing = null;
 
@@ -60,7 +60,7 @@ async function loadStaff(dept) {
   if (!staffCache.has(dept))
     staffCache.set(
       dept,
-      apiJsonCached(`api/users?departmentId=${encodeURIComponent(dept)}`, {}, 300000),
+      cachedApi(`api/users?departmentId=${encodeURIComponent(dept)}`, {}, 300000),
     );
   return await staffCache.get(dept);
 }
@@ -86,11 +86,7 @@ async function fillHostPeople(deptInput, personSelect, optional = true, selected
 async function setHost(index, userId) {
   if (!userId) return;
   try {
-    const result = await apiJsonCached(
-      `api/users/profile/${encodeURIComponent(userId)}`,
-      {},
-      300000,
-    );
+    const result = await cachedApi(`api/users/profile/${encodeURIComponent(userId)}`, {}, 300000);
     const profile = result.user || {};
     const dept = (profile.departmentId || profile.dpid || '').trim();
     if (dept) {
@@ -225,12 +221,12 @@ function updateLocationControl() {
     updateCustomLocation();
   }
 }
-function isCustomLocationSelected() {
+function isCustomLocation() {
   const t = locationSelect.selectedOptions?.[0]?.textContent?.trim() || '';
   return locationSelect.value === 'custom' || t === '自行填寫';
 }
 function updateCustomLocation() {
-  const custom = isCustomLocationSelected();
+  const custom = isCustomLocation();
   customLocation.hidden = !custom;
   customLocation.required = custom;
   if (!custom) customLocation.value = '';
@@ -254,7 +250,7 @@ async function initialize() {
   try {
     const [locations, depts] = await Promise.all([
       apiJson('api/meeting-locations'),
-      apiJsonCached('api/departments', {}, 300000),
+      cachedApi('api/departments', {}, 300000),
     ]);
     departments = depts || [];
     locationSelect.innerHTML =
@@ -298,11 +294,10 @@ async function initialize() {
       if (duplicate) showCenterDialog('部分人員已在本次會議名單中，系統未重複加入。');
     };
     meetingStart.addEventListener('change', () => {
-      if (!endTimeManuallyChanged || !meetingEnd.value)
-        meetingEnd.value = addOneHour(meetingStart.value);
+      if (!endTimeEdited || !meetingEnd.value) meetingEnd.value = addOneHour(meetingStart.value);
     });
     meetingEnd.addEventListener('change', () => {
-      endTimeManuallyChanged = true;
+      endTimeEdited = true;
     });
 
     if (editingId) {
@@ -316,7 +311,7 @@ async function initialize() {
       form.elements.end.value = existing.end;
       meetingNote.value = existing.note || '';
       syncOpenNote();
-      allowUnlisted.checked = !!existing.allowUnlistedParticipants;
+      walkIn.checked = !!existing.allowWalkIn;
       document.querySelector(
         `input[name="hasLocation"][value="${existing.hasLocation ? '1' : '0'}"]`,
       ).checked = true;
@@ -363,7 +358,7 @@ async function initialize() {
           host2,
           host3Dept,
           host3,
-          allowUnlisted,
+          walkIn,
           participantDept,
           participantSearch,
           addParticipant,
@@ -410,12 +405,12 @@ form.onsubmit = async (event) => {
   event.preventDefault();
   syncOpenNote();
   const has = document.querySelector('input[name="hasLocation"]:checked')?.value === '1';
-  const customLocationSelected = isCustomLocationSelected();
-  if (has && !customLocationSelected && !locationSelect.value) {
+  const useCustomLocation = isCustomLocation();
+  if (has && !useCustomLocation && !locationSelect.value) {
     notifyWarning('勾選有會議地點時，請選擇地點');
     return locationSelect.focus();
   }
-  if (has && customLocationSelected && !customLocation.value.trim()) {
+  if (has && useCustomLocation && !customLocation.value.trim()) {
     notifyWarning('請輸入會議地點');
     return customLocation.focus();
   }
@@ -433,14 +428,14 @@ form.onsubmit = async (event) => {
     start: meetingStart.value,
     end: meetingEnd.value,
     hasLocation: has,
-    locationID: has && !customLocationSelected ? locationSelect.value : null,
-    customLocation: has && customLocationSelected ? customLocation.value.trim() : null,
+    locationID: has && !useCustomLocation ? locationSelect.value : null,
+    customLocation: has && useCustomLocation ? customLocation.value.trim() : null,
     host1UserID: host1.value,
     host2UserID: host2.value || null,
     host3UserID: host3.value || null,
     note: meetingNote.value.trim(),
     participantUserIDs: [...selected.keys()],
-    allowUnlistedParticipants: allowUnlisted.checked,
+    allowWalkIn: walkIn.checked,
     rowVersion: existing?.rowVersion || null,
   };
   submitButton.disabled = true;

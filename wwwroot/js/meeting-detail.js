@@ -34,7 +34,7 @@ const formatDate = (value) => String(value || '').replaceAll('-', '/');
     const note = String(meeting.note || '').trim();
     content.classList.add('meeting-detail-panel');
     const isHost = meeting.relation === 'host';
-    const state = meetingAccessState(meeting);
+    const state = getAccess(meeting);
     const stateText = { open: '進行中', pending: '尚未開始', closed: '已結束' }[state];
     title.innerHTML = `${esc(meeting.name)} <span class="tag ${state} detail-state-tag">${stateText}</span>`;
     const qrBtn = (cls) =>
@@ -64,8 +64,8 @@ const formatDate = (value) => String(value || '').replaceAll('-', '/');
           </div>
           <div class="detail-hosts"><span class="detail-label">主持人</span><span class="detail-value">${hostText}</span></div>
           <div class="attendance-block">
-            <span class="detail-label">${meeting.allowUnlistedParticipants ? '出席狀況（開放非名單人員加入，不計算出席率）' : '出席狀況'}</span>
-            <div id="attendanceSummaryBox" class="attendance-summary">${meeting.allowUnlistedParticipants ? '' : `應到 <span class="attendance-value">${meeting.participantCount ?? 0}</span><span class="attendance-unit">人</span>`}</div>
+            <span class="detail-label">${meeting.allowWalkIn ? '出席狀況（開放非名單人員加入，不計算出席率）' : '出席狀況'}</span>
+            <div id="attendanceSummaryBox" class="attendance-summary">${meeting.allowWalkIn ? '' : `應到 <span class="attendance-value">${meeting.participantCount ?? 0}</span><span class="attendance-unit">人</span>`}</div>
           </div>
           <div class="detail-meta">會議編號 ${esc(meeting.meetingNo || meeting.id)}　·　最後更新 ${esc(last)}</div>
         </section>

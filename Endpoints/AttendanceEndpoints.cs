@@ -6,7 +6,7 @@ internal static class AttendanceEndpoints
     {
         app.MapGet("/api/meetings/{meetingNo}/attendance", async (string meetingNo, ClaimsPrincipal principal, IConfiguration configuration) =>
         {
-            var userId = CurrentEmployeeNo(principal);
+            var userId = GetUserId(principal);
             await using var connection = new SqlConnection(GetConnection(configuration, "LineMeetingDb"));
             await connection.OpenAsync();
 
@@ -15,7 +15,7 @@ internal static class AttendanceEndpoints
                 FROM dbo.Meeting
                 WHERE MeetingNo = @MeetingNo
                   AND ISNULL(IsDeleted, 0) = 0
-                  AND (@User IN (Host1EmployeeNo, Host2EmployeeNo, Host3EmployeeNo) OR CreatedByEmployeeNo = @User);
+                  AND (@User IN (Host1, Host2, Host3) OR CreateUser = @User);
                 """;
             await using (var permission = new SqlCommand(permissionSql, connection))
             {
@@ -27,19 +27,19 @@ internal static class AttendanceEndpoints
 
             object meeting;
             const string basicSql = """
-                SELECT m.MeetingNo, m.MeetingName, m.MeetingSubName, m.StartDateTime, m.EndDateTime,
+                SELECT m.MeetingNo, m.MeetingName, m.MeetingSubName, m.StartTime, m.EndTime,
                        m.LocationType, m.RoomID, m.CustomLocation,
-                       ISNULL(m.AllowUnlistedParticipants, 0) AS AllowUnlistedParticipants,
-                       ISNULL(m.ExpectedParticipantCount, 0) AS ExpectedParticipantCount,
-                       ISNULL(NULLIF(LTRIM(RTRIM(u1.CNM)), N''), m.Host1EmployeeNo) AS Host1Name,
-                       CASE WHEN NULLIF(LTRIM(RTRIM(m.Host2EmployeeNo)), '') IS NULL THEN N''
-                            ELSE ISNULL(NULLIF(LTRIM(RTRIM(u2.CNM)), N''), m.Host2EmployeeNo) END AS Host2Name,
-                       CASE WHEN NULLIF(LTRIM(RTRIM(m.Host3EmployeeNo)), '') IS NULL THEN N''
-                            ELSE ISNULL(NULLIF(LTRIM(RTRIM(u3.CNM)), N''), m.Host3EmployeeNo) END AS Host3Name
+                       ISNULL(m.AllowWalkIn, 0) AS AllowWalkIn,
+                       ISNULL(m.ExpectedCount, 0) AS ExpectedCount,
+                       ISNULL(NULLIF(LTRIM(RTRIM(u1.CNM)), N''), m.Host1) AS Host1Name,
+                       CASE WHEN NULLIF(LTRIM(RTRIM(m.Host2)), '') IS NULL THEN N''
+                            ELSE ISNULL(NULLIF(LTRIM(RTRIM(u2.CNM)), N''), m.Host2) END AS Host2Name,
+                       CASE WHEN NULLIF(LTRIM(RTRIM(m.Host3)), '') IS NULL THEN N''
+                            ELSE ISNULL(NULLIF(LTRIM(RTRIM(u3.CNM)), N''), m.Host3) END AS Host3Name
                 FROM dbo.Meeting m
-                LEFT JOIN LineDB.dbo.UserInfo u1 ON u1.SNTOPID = m.Host1EmployeeNo
-                LEFT JOIN LineDB.dbo.UserInfo u2 ON u2.SNTOPID = m.Host2EmployeeNo
-                LEFT JOIN LineDB.dbo.UserInfo u3 ON u3.SNTOPID = m.Host3EmployeeNo
+                LEFT JOIN LineDB.dbo.UserInfo u1 ON u1.SNTOPID = m.Host1
+                LEFT JOIN LineDB.dbo.UserInfo u2 ON u2.SNTOPID = m.Host2
+                LEFT JOIN LineDB.dbo.UserInfo u3 ON u3.SNTOPID = m.Host3
                 WHERE m.MeetingNo = @MeetingNo
                   AND ISNULL(m.IsDeleted, 0) = 0;
                 """;
@@ -48,16 +48,16 @@ internal static class AttendanceEndpoints
                 command.Parameters.Add("@MeetingNo", SqlDbType.VarChar, 20).Value = meetingNo.Trim();
                 await using var reader = await command.ExecuteReaderAsync();
                 if (!await reader.ReadAsync()) return Results.NotFound(new { success = false, message = "找不到會議。" });
-                var start = Convert.ToDateTime(reader["StartDateTime"]);
-                var end = Convert.ToDateTime(reader["EndDateTime"]);
+                var start = Convert.ToDateTime(reader["StartTime"]);
+                var end = Convert.ToDateTime(reader["EndTime"]);
                 var locationType = Convert.ToInt32(reader["LocationType"]);
                 var roomId = reader["RoomID"] is DBNull ? "" : reader["RoomID"].ToString();
                 var customLocation = reader["CustomLocation"] is DBNull ? "" : reader["CustomLocation"].ToString();
                 var meetingId = reader["MeetingNo"].ToString();
                 var meetingName = reader["MeetingName"].ToString();
                 var meetingSubName = reader["MeetingSubName"] is DBNull ? "" : reader["MeetingSubName"].ToString();
-                var allowUnlistedParticipants = Convert.ToBoolean(reader["AllowUnlistedParticipants"]);
-                var expectedParticipantCount = Convert.ToInt32(reader["ExpectedParticipantCount"]);
+                var allowWalkIn = Convert.ToBoolean(reader["AllowWalkIn"]);
+                var expectedCount = Convert.ToInt32(reader["ExpectedCount"]);
                 var hostNames = new[]
                 {
                     reader["Host1Name"] is DBNull ? "" : reader["Host1Name"].ToString()?.Trim() ?? "",
@@ -65,7 +65,7 @@ internal static class AttendanceEndpoints
                     reader["Host3Name"] is DBNull ? "" : reader["Host3Name"].ToString()?.Trim() ?? ""
                 }.Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
                 await reader.CloseAsync();
-                var locationDisplay = await ResolveLocationDisplay(connection, locationType, roomId, customLocation);
+                var locationDisplay = await GetLocationName(connection, locationType, roomId, customLocation);
                 meeting = new
                 {
                     id = meetingId,
@@ -77,8 +77,8 @@ internal static class AttendanceEndpoints
                     location = locationDisplay,
                     hosts = hostNames,
                     host = string.Join("、", hostNames),
-                    allowUnlistedParticipants,
-                    expectedParticipantCount
+                    allowWalkIn,
+                    expectedCount
                 };
             }
 
@@ -86,18 +86,18 @@ internal static class AttendanceEndpoints
             const string sql = """
                 SELECT
                     p.ParticipantID, p.ParticipantType, p.Source,
-                    p.EmployeeNo, p.ExternalName, p.ExternalOrganization, p.ExternalTitle,
-                    CASE WHEN p.ParticipantType = 1 THEN ISNULL(NULLIF(LTRIM(RTRIM(u.CNM)), N''), p.EmployeeNo) ELSE p.ExternalName END AS OriginalName,
-                    CASE WHEN p.ParticipantType = 1 THEN ISNULL(LTRIM(RTRIM(u.DPCNM)), N'') ELSE p.ExternalOrganization END AS OriginalDepartment,
-                    CASE WHEN p.ParticipantType = 1 THEN ISNULL(LTRIM(RTRIM(u.DUTNM)), N'') ELSE ISNULL(p.ExternalTitle, N'') END AS OriginalTitle,
-                    a.SignInTime, a.SignOutTime, a.ProxySignEmployeeNo, p.AbsenceReason AS Remark,
-                    ISNULL(NULLIF(LTRIM(RTRIM(proxyUser.CNM)), N''), a.ProxySignEmployeeNo) AS ProxyName,
+                    p.EmployeeNo, p.GuestName, p.GuestOrg, p.GuestTitle,
+                    CASE WHEN p.ParticipantType = 1 THEN ISNULL(NULLIF(LTRIM(RTRIM(u.CNM)), N''), p.EmployeeNo) ELSE p.GuestName END AS OriginalName,
+                    CASE WHEN p.ParticipantType = 1 THEN ISNULL(LTRIM(RTRIM(u.DPCNM)), N'') ELSE p.GuestOrg END AS OriginalDepartment,
+                    CASE WHEN p.ParticipantType = 1 THEN ISNULL(LTRIM(RTRIM(u.DUTNM)), N'') ELSE ISNULL(p.GuestTitle, N'') END AS OriginalTitle,
+                    a.SignInTime, a.SignOutTime, a.ProxyUser, p.AbsenceReason AS Remark,
+                    ISNULL(NULLIF(LTRIM(RTRIM(proxyUser.CNM)), N''), a.ProxyUser) AS ProxyName,
                     ISNULL(LTRIM(RTRIM(proxyUser.DPCNM)), N'') AS ProxyDepartment,
                     ISNULL(LTRIM(RTRIM(proxyUser.DUTNM)), N'') AS ProxyTitle
                 FROM dbo.MeetingParticipant p
                 LEFT JOIN LineDB.dbo.UserInfo u ON u.SNTOPID = p.EmployeeNo
                 LEFT JOIN dbo.MeetingAttendance a ON a.ParticipantID = p.ParticipantID
-                LEFT JOIN LineDB.dbo.UserInfo proxyUser ON proxyUser.SNTOPID = a.ProxySignEmployeeNo
+                LEFT JOIN LineDB.dbo.UserInfo proxyUser ON proxyUser.SNTOPID = a.ProxyUser
                 WHERE p.MeetingNo = @MeetingNo
                 ORDER BY p.ParticipantType, OriginalName;
                 """;
@@ -110,21 +110,21 @@ internal static class AttendanceEndpoints
                 var isInternal = participantType == 1;
                 rows.Add(new
                 {
-                    userID = ParticipantRowId(participantType, listReader["EmployeeNo"], Convert.ToInt32(listReader["ParticipantID"])),
+                    userID = GetRowKey(participantType, listReader["EmployeeNo"], Convert.ToInt32(listReader["ParticipantID"])),
                     employeeId = isInternal ? listReader["EmployeeNo"].ToString() : "",
                     name = listReader["OriginalName"].ToString(),
                     department = listReader["OriginalDepartment"].ToString(),
                     title = listReader["OriginalTitle"].ToString(),
                     participantType = isInternal ? "Internal" : "External",
                     source = SourceName(Convert.ToInt32(listReader["Source"])),
-                    externalName = isInternal ? null : listReader["ExternalName"].ToString(),
-                    externalOrganization = isInternal ? null : listReader["ExternalOrganization"].ToString(),
+                    guestName = isInternal ? null : listReader["GuestName"].ToString(),
+                    guestOrg = isInternal ? null : listReader["GuestOrg"].ToString(),
                     @in = listReader["SignInTime"] is DBNull ? "" : Convert.ToDateTime(listReader["SignInTime"]).ToString("HH:mm"),
                     @out = listReader["SignOutTime"] is DBNull ? "" : Convert.ToDateTime(listReader["SignOutTime"]).ToString("HH:mm"),
                     attendanceStatus = listReader["SignInTime"] is not DBNull ? "出席" : "未出席",
-                    proxyEmployeeNo = listReader["ProxySignEmployeeNo"] is DBNull ? "" : listReader["ProxySignEmployeeNo"].ToString(),
-                    proxyDepartment = listReader["ProxySignEmployeeNo"] is DBNull ? "" : listReader["ProxyDepartment"].ToString(),
-                    proxyName = listReader["ProxySignEmployeeNo"] is DBNull ? "" : listReader["ProxyName"].ToString(),
+                    proxyEmployeeNo = listReader["ProxyUser"] is DBNull ? "" : listReader["ProxyUser"].ToString(),
+                    proxyDepartment = listReader["ProxyUser"] is DBNull ? "" : listReader["ProxyDepartment"].ToString(),
+                    proxyName = listReader["ProxyUser"] is DBNull ? "" : listReader["ProxyName"].ToString(),
                     note = listReader["Remark"] is DBNull ? "" : listReader["Remark"].ToString()
                 });
             }
@@ -135,7 +135,7 @@ internal static class AttendanceEndpoints
         app.MapPut("/api/meetings/{meetingNo}/attendance", async (
             string meetingNo, ClaimsPrincipal principal, AttendanceSaveRequest request, IConfiguration configuration) =>
         {
-            var userId = CurrentEmployeeNo(principal);
+            var userId = GetUserId(principal);
             // 遇到資料庫死結時整筆交易重新執行（最多 3 次），使用者不會看到錯誤。
             return await RetryOnDeadlock(async () =>
             {
@@ -146,11 +146,11 @@ internal static class AttendanceEndpoints
                 try
                 {
                     const string meetingSql = """
-                        SELECT StartDateTime
+                        SELECT StartTime
                         FROM dbo.Meeting
                         WHERE MeetingNo = @MeetingNo
                           AND ISNULL(IsDeleted, 0) = 0
-                          AND (@User IN (Host1EmployeeNo, Host2EmployeeNo, Host3EmployeeNo) OR CreatedByEmployeeNo = @User);
+                          AND (@User IN (Host1, Host2, Host3) OR CreateUser = @User);
                         """;
                     DateTime meetingDate;
                     await using (var meetingCommand = new SqlCommand(meetingSql, connection, tx))
@@ -163,12 +163,12 @@ internal static class AttendanceEndpoints
                         meetingDate = Convert.ToDateTime(value).Date;
                     }
 
-                    await SetAuditContext(connection, tx, userId, "sheet");
+                    await SetLogUser(connection, tx, userId, "sheet");
 
                     foreach (var row in request.Rows ?? [])
                     {
                         // 只有名單上的人可以有簽到紀錄；找不到就代表前端送來的資料與名單不符。
-                        var participantId = await FindParticipantByRowId(connection, tx, meetingNo, row.UserID)
+                        var participantId = await FindParticipantId(connection, tx, meetingNo, row.UserID)
                             ?? throw new InvalidOperationException("此人員不在本次會議名單中，無法修改簽到資料。");
 
                         DateTime? signIn = ParseAttendanceTime(meetingDate, row.In);
@@ -188,7 +188,7 @@ internal static class AttendanceEndpoints
                         var exists = false;
                         // 簽到紀錄在 MeetingAttendance，未出席原因在 MeetingParticipant，兩邊一起鎖定讀出。
                         const string currentSql = """
-                            SELECT a.SignInTime, a.SignOutTime, a.ProxySignEmployeeNo, p.AbsenceReason
+                            SELECT a.SignInTime, a.SignOutTime, a.ProxyUser, p.AbsenceReason
                             FROM dbo.MeetingParticipant AS p WITH (UPDLOCK, HOLDLOCK)
                             LEFT JOIN dbo.MeetingAttendance AS a WITH (UPDLOCK, HOLDLOCK) ON a.ParticipantID = p.ParticipantID
                             WHERE p.ParticipantID = @ParticipantID;
@@ -202,7 +202,7 @@ internal static class AttendanceEndpoints
                                 exists = reader["SignInTime"] is not DBNull;
                                 currentIn = exists ? Convert.ToDateTime(reader["SignInTime"]) : null;
                                 currentOut = reader["SignOutTime"] is DBNull ? null : Convert.ToDateTime(reader["SignOutTime"]);
-                                currentProxy = reader["ProxySignEmployeeNo"] is DBNull ? "" : reader["ProxySignEmployeeNo"].ToString()?.Trim() ?? "";
+                                currentProxy = reader["ProxyUser"] is DBNull ? "" : reader["ProxyUser"].ToString()?.Trim() ?? "";
                                 currentReason = reader["AbsenceReason"] is DBNull ? "" : reader["AbsenceReason"].ToString()?.Trim() ?? "";
                             }
                         }
@@ -245,15 +245,15 @@ internal static class AttendanceEndpoints
                                 UPDATE dbo.MeetingAttendance
                                 SET SignInTime = @SignInTime,
                                     SignOutTime = @SignOutTime,
-                                    ProxySignEmployeeNo = @Proxy,
-                                    UpdatedByEmployeeNo = @User,
-                                    UpdatedTime = dbo.AppNow()
+                                    ProxyUser = @Proxy,
+                                    UpdateUser = @User,
+                                    UpdateTime = dbo.fn_Now()
                                 WHERE ParticipantID = @ParticipantID;
                             ELSE
                                 INSERT dbo.MeetingAttendance
-                                    (ParticipantID, SignInTime, SignOutTime, ProxySignEmployeeNo, UpdatedByEmployeeNo, UpdatedTime)
+                                    (ParticipantID, SignInTime, SignOutTime, ProxyUser, UpdateUser, UpdateTime)
                                 VALUES
-                                    (@ParticipantID, @SignInTime, @SignOutTime, @Proxy, @User, dbo.AppNow());
+                                    (@ParticipantID, @SignInTime, @SignOutTime, @Proxy, @User, dbo.fn_Now());
 
                             -- 已出席就沒有未出席原因。
                             UPDATE dbo.MeetingParticipant SET AbsenceReason = NULL WHERE ParticipantID = @ParticipantID;
@@ -273,7 +273,7 @@ internal static class AttendanceEndpoints
                 catch (Exception ex) when (!IsDeadlock(ex))
                 {
                     await tx.RollbackAsync();
-                    return Results.Json(new { success = false, message = CleanDatabaseMessage(ex) }, statusCode: 400);
+                    return Results.Json(new { success = false, message = GetErrorMessage(ex) }, statusCode: 400);
                 }
             });
         });
@@ -284,11 +284,11 @@ internal static class AttendanceEndpoints
             IDataProtectionProvider dataProtectionProvider,
             IConfiguration configuration) =>
         {
-            if (!TryReadMobileMeetingSession(httpRequest, dataProtectionProvider, out var mobileSession))
-                return MobileSessionUnauthorized();
+            if (!TryReadMobileSession(httpRequest, dataProtectionProvider, out var mobileSession))
+                return SessionExpired();
 
             if (!string.Equals(mobileSession!.MeetingNo, meetingNo.Trim(), StringComparison.OrdinalIgnoreCase))
-                return MobileSessionUnauthorized();
+                return SessionExpired();
             if (await CheckMobileSessionAsync(mobileSession, configuration) is { } sessionProblem)
                 return sessionProblem;
 
@@ -301,12 +301,12 @@ internal static class AttendanceEndpoints
                 SELECT
                     a.SignInTime,
                     a.SignOutTime,
-                    a.ProxySignEmployeeNo,
-                    ISNULL(NULLIF(LTRIM(RTRIM(proxyUser.CNM)), N''), a.ProxySignEmployeeNo) AS ProxyName,
+                    a.ProxyUser,
+                    ISNULL(NULLIF(LTRIM(RTRIM(proxyUser.CNM)), N''), a.ProxyUser) AS ProxyName,
                     ISNULL(LTRIM(RTRIM(proxyUser.DPCNM)), N'') AS ProxyDepartment
                 FROM dbo.MeetingParticipant p
                 JOIN dbo.MeetingAttendance a ON a.ParticipantID = p.ParticipantID
-                LEFT JOIN LineDB.dbo.UserInfo proxyUser ON proxyUser.SNTOPID = a.ProxySignEmployeeNo
+                LEFT JOIN LineDB.dbo.UserInfo proxyUser ON proxyUser.SNTOPID = a.ProxyUser
                 WHERE p.MeetingNo = @MeetingNo
                   AND ((@ParticipantType = 1 AND p.EmployeeNo = @Identity)
                     OR (@ParticipantType = 2 AND p.GuestKey = @Identity));
@@ -321,7 +321,7 @@ internal static class AttendanceEndpoints
             {
                 signInTime = reader["SignInTime"] is DBNull ? "" : Convert.ToDateTime(reader["SignInTime"]).ToString("yyyy-MM-dd HH:mm"),
                 signOutTime = reader["SignOutTime"] is DBNull ? "" : Convert.ToDateTime(reader["SignOutTime"]).ToString("yyyy-MM-dd HH:mm"),
-                proxyEmployeeNo = reader["ProxySignEmployeeNo"] is DBNull ? "" : reader["ProxySignEmployeeNo"].ToString()?.Trim() ?? "",
+                proxyEmployeeNo = reader["ProxyUser"] is DBNull ? "" : reader["ProxyUser"].ToString()?.Trim() ?? "",
                 proxyName = reader["ProxyName"] is DBNull ? "" : reader["ProxyName"].ToString()?.Trim() ?? "",
                 proxyDepartment = reader["ProxyDepartment"] is DBNull ? "" : reader["ProxyDepartment"].ToString()?.Trim() ?? ""
             });
@@ -330,7 +330,7 @@ internal static class AttendanceEndpoints
         app.MapPost("/api/meetings/{meetingNo}/attendance/{action}", async (
             string meetingNo,
             string action,
-            OwnAttendanceRequest request,
+            SelfSignRequest request,
             HttpRequest httpRequest,
             IDataProtectionProvider dataProtectionProvider,
             IConfiguration configuration) =>
@@ -338,19 +338,19 @@ internal static class AttendanceEndpoints
             if (action is not ("signin" or "signout"))
                 return Results.BadRequest(new { success = false, message = "簽到動作不正確。" });
 
-            if (!TryReadMobileMeetingSession(httpRequest, dataProtectionProvider, out var mobileSession))
-                return MobileSessionUnauthorized();
+            if (!TryReadMobileSession(httpRequest, dataProtectionProvider, out var mobileSession))
+                return SessionExpired();
 
             if (!string.Equals(mobileSession!.MeetingNo, meetingNo.Trim(), StringComparison.OrdinalIgnoreCase))
-                return MobileSessionUnauthorized();
+                return SessionExpired();
             if (await CheckMobileSessionAsync(mobileSession, configuration) is { } sessionProblem)
                 return sessionProblem;
 
             var employeeNo = mobileSession.EmployeeNo;
             if (mobileSession.ParticipantType == 2
-                && (string.IsNullOrWhiteSpace(mobileSession.ExternalName)
-                    || string.IsNullOrWhiteSpace(mobileSession.ExternalOrganization)
-                    || string.IsNullOrWhiteSpace(mobileSession.ExternalTitle)))
+                && (string.IsNullOrWhiteSpace(mobileSession.GuestName)
+                    || string.IsNullOrWhiteSpace(mobileSession.GuestOrg)
+                    || string.IsNullOrWhiteSpace(mobileSession.GuestTitle)))
             {
                 return Results.BadRequest(new { success = false, message = "請先完成單位、姓名及職稱資料後再簽到。" });
             }
@@ -362,13 +362,13 @@ internal static class AttendanceEndpoints
                 mobileSession.ParticipantType,
                 employeeNo,
                 proxyEmployeeNo: null,
-                updatedBy: mobileSession.ParticipantType == 1 ? employeeNo : null,
+                updateUser: mobileSession.ParticipantType == 1 ? employeeNo : null,
                 configuration);
         }).AllowAnonymous();
 
         app.MapPost("/api/meetings/{meetingNo}/attendance/proxy", async (
             string meetingNo,
-            ProxyAttendanceRequest request,
+            ProxySignRequest request,
             HttpRequest httpRequest,
             IDataProtectionProvider dataProtectionProvider,
             IConfiguration configuration) =>
@@ -376,11 +376,11 @@ internal static class AttendanceEndpoints
             if (request.Action is not ("signin" or "signout"))
                 return Results.BadRequest(new { success = false, message = "代簽動作不正確。" });
 
-            if (!TryReadMobileMeetingSession(httpRequest, dataProtectionProvider, out var mobileSession))
-                return MobileSessionUnauthorized();
+            if (!TryReadMobileSession(httpRequest, dataProtectionProvider, out var mobileSession))
+                return SessionExpired();
 
             if (!string.Equals(mobileSession!.MeetingNo, meetingNo.Trim(), StringComparison.OrdinalIgnoreCase))
-                return MobileSessionUnauthorized();
+                return SessionExpired();
             if (await CheckMobileSessionAsync(mobileSession, configuration) is { } sessionProblem)
                 return sessionProblem;
 
@@ -394,7 +394,7 @@ internal static class AttendanceEndpoints
             {
                 await permissionConnection.OpenAsync();
                 await using var permissionCommand = new SqlCommand(
-                    "SELECT ISNULL(AllowUnlistedParticipants, 0) FROM dbo.Meeting WHERE MeetingNo = @MeetingNo AND ISNULL(IsDeleted,0)=0;",
+                    "SELECT ISNULL(AllowWalkIn, 0) FROM dbo.Meeting WHERE MeetingNo = @MeetingNo AND ISNULL(IsDeleted,0)=0;",
                     permissionConnection);
                 permissionCommand.Parameters.Add("@MeetingNo", SqlDbType.VarChar, 20).Value = meetingNo.Trim();
                 var allowOpen = Convert.ToBoolean(await permissionCommand.ExecuteScalarAsync() ?? false);
@@ -408,20 +408,20 @@ internal static class AttendanceEndpoints
                 1,
                 request.ParticipantEmployeeNo,
                 proxyEmployeeNo: operatorEmployeeNo,
-                updatedBy: operatorEmployeeNo,
+                updateUser: operatorEmployeeNo,
                 configuration);
         }).AllowAnonymous();
     }
 
     // identity：院內人員為員工編號，訪客為 GuestKey。
-    // updatedBy：操作者的員工編號；訪客自行操作時為 null。
+    // updateUser：操作者的員工編號；訪客自行操作時為 null。
     internal static async Task<IResult> SaveSingleAttendance(
         string meetingNo,
         string action,
         int participantType,
         string? identity,
         string? proxyEmployeeNo,
-        string? updatedBy,
+        string? updateUser,
         IConfiguration configuration)
     {
         // 遇到資料庫死結時整筆交易重新執行（最多 3 次），使用者不會看到錯誤。
@@ -434,9 +434,9 @@ internal static class AttendanceEndpoints
             try
             {
                 const string meetingSql = """
-                    SELECT StartDateTime, EndDateTime,
-                           Host1EmployeeNo, Host2EmployeeNo, Host3EmployeeNo, CreatedByEmployeeNo,
-                           ISNULL(AllowUnlistedParticipants, 0) AS AllowUnlistedParticipants
+                    SELECT StartTime, EndTime,
+                           Host1, Host2, Host3, CreateUser,
+                           ISNULL(AllowWalkIn, 0) AS AllowWalkIn
                     FROM dbo.Meeting
                     WHERE MeetingNo = @MeetingNo
                       AND ISNULL(IsDeleted, 0) = 0;
@@ -448,35 +448,35 @@ internal static class AttendanceEndpoints
                 string host2EmployeeNo;
                 string host3EmployeeNo;
                 string createdByEmployeeNo;
-                bool allowUnlistedParticipants;
+                bool allowWalkIn;
 
                 await using (var meetingCommand = new SqlCommand(meetingSql, connection, tx))
                 {
                     meetingCommand.Parameters.Add("@MeetingNo", SqlDbType.VarChar, 20).Value = meetingNo.Trim();
                     await using var reader = await meetingCommand.ExecuteReaderAsync();
                     if (!await reader.ReadAsync()) throw new InvalidOperationException("找不到會議。");
-                    startTime = Convert.ToDateTime(reader["StartDateTime"]);
-                    endTime = Convert.ToDateTime(reader["EndDateTime"]);
-                    host1EmployeeNo = reader["Host1EmployeeNo"] is DBNull ? "" : reader["Host1EmployeeNo"].ToString()?.Trim() ?? "";
-                    host2EmployeeNo = reader["Host2EmployeeNo"] is DBNull ? "" : reader["Host2EmployeeNo"].ToString()?.Trim() ?? "";
-                    host3EmployeeNo = reader["Host3EmployeeNo"] is DBNull ? "" : reader["Host3EmployeeNo"].ToString()?.Trim() ?? "";
-                    createdByEmployeeNo = reader["CreatedByEmployeeNo"] is DBNull ? "" : reader["CreatedByEmployeeNo"].ToString()?.Trim() ?? "";
-                    allowUnlistedParticipants = Convert.ToBoolean(reader["AllowUnlistedParticipants"]);
+                    startTime = Convert.ToDateTime(reader["StartTime"]);
+                    endTime = Convert.ToDateTime(reader["EndTime"]);
+                    host1EmployeeNo = reader["Host1"] is DBNull ? "" : reader["Host1"].ToString()?.Trim() ?? "";
+                    host2EmployeeNo = reader["Host2"] is DBNull ? "" : reader["Host2"].ToString()?.Trim() ?? "";
+                    host3EmployeeNo = reader["Host3"] is DBNull ? "" : reader["Host3"].ToString()?.Trim() ?? "";
+                    createdByEmployeeNo = reader["CreateUser"] is DBNull ? "" : reader["CreateUser"].ToString()?.Trim() ?? "";
+                    allowWalkIn = Convert.ToBoolean(reader["AllowWalkIn"]);
                 }
 
-                if (CheckInRules.CheckWindow(action, startTime, endTime, AppClock.Now) is { } windowProblem)
+                if (SignInRule.CheckTime(action, startTime, endTime, TaipeiTime.Now) is { } windowProblem)
                     throw new InvalidOperationException(windowProblem);
 
                 var isProxyOperation = !string.IsNullOrWhiteSpace(proxyEmployeeNo);
-                await SetAuditContext(connection, tx, updatedBy, isProxyOperation ? "proxy" : "mobile");
-                if (isProxyOperation && allowUnlistedParticipants)
+                await SetLogUser(connection, tx, updateUser, isProxyOperation ? "proxy" : "mobile");
+                if (isProxyOperation && allowWalkIn)
                     throw new InvalidOperationException("此會議允許非名單人員加入，因此不可使用代簽功能。");
                 if (isProxyOperation)
                 {
-                    if (participantType != 1 || string.IsNullOrWhiteSpace(updatedBy))
+                    if (participantType != 1 || string.IsNullOrWhiteSpace(updateUser))
                         throw new InvalidOperationException("代簽功能僅限院內人員之間使用。");
                     var hosts = new[] { host1EmployeeNo, host2EmployeeNo, host3EmployeeNo, createdByEmployeeNo };
-                    var isHostOperator = hosts.Any(x => string.Equals(x, updatedBy, StringComparison.OrdinalIgnoreCase));
+                    var isHostOperator = hosts.Any(x => string.Equals(x, updateUser, StringComparison.OrdinalIgnoreCase));
                     const string operatorSql = """
                         SELECT COUNT(*)
                         FROM dbo.MeetingParticipant
@@ -484,7 +484,7 @@ internal static class AttendanceEndpoints
                         """;
                     await using var operatorCommand = new SqlCommand(operatorSql, connection, tx);
                     operatorCommand.Parameters.Add("@MeetingNo", SqlDbType.VarChar, 20).Value = meetingNo.Trim();
-                    operatorCommand.Parameters.Add("@EmployeeNo", SqlDbType.VarChar, 20).Value = updatedBy.Trim();
+                    operatorCommand.Parameters.Add("@EmployeeNo", SqlDbType.VarChar, 20).Value = updateUser.Trim();
                     var isInternalParticipant = Convert.ToInt32(await operatorCommand.ExecuteScalarAsync()) > 0;
                     if (!isHostOperator && !isInternalParticipant)
                         throw new InvalidOperationException("只有本次會議的院內參與者可以代簽院內人員。");
@@ -520,13 +520,13 @@ internal static class AttendanceEndpoints
 
                     // 開放式會議：院內人員本人第一次簽到時自動加入名單，標記為現場加入（Source = 2），
                     // 不會被算進預設人數與出席率。
-                    if (!(allowUnlistedParticipants && !isProxyOperation && action == "signin"))
+                    if (!(allowWalkIn && !isProxyOperation && action == "signin"))
                         throw new InvalidOperationException("此人員不在本次會議參與名單中，無法簽到。");
 
                     const string addWalkInSql = """
-                        INSERT dbo.MeetingParticipant (MeetingNo, ParticipantType, Source, EmployeeNo, CreatedByEmployeeNo, CreatedTime)
+                        INSERT dbo.MeetingParticipant (MeetingNo, ParticipantType, Source, EmployeeNo, CreateUser, CreateTime)
                         OUTPUT INSERTED.ParticipantID
-                        VALUES (@MeetingNo, 1, 2, @EmployeeNo, @EmployeeNo, dbo.AppNow());
+                        VALUES (@MeetingNo, 1, 2, @EmployeeNo, @EmployeeNo, dbo.fn_Now());
                         """;
                     await using var addWalkIn = new SqlCommand(addWalkInSql, connection, tx);
                     addWalkIn.Parameters.Add("@MeetingNo", SqlDbType.VarChar, 20).Value = meetingNo.Trim();
@@ -538,7 +538,7 @@ internal static class AttendanceEndpoints
                 DateTime? existingSignOut = null;
                 string existingProxy = "";
                 await using (var lockCommand = new SqlCommand("""
-                    SELECT SignInTime, SignOutTime, ProxySignEmployeeNo
+                    SELECT SignInTime, SignOutTime, ProxyUser
                     FROM dbo.MeetingAttendance WITH (UPDLOCK, HOLDLOCK)
                     WHERE ParticipantID = @ParticipantID;
                     """, connection, tx))
@@ -549,7 +549,7 @@ internal static class AttendanceEndpoints
                     {
                         existingSignIn = Convert.ToDateTime(reader["SignInTime"]);
                         existingSignOut = reader["SignOutTime"] is DBNull ? null : Convert.ToDateTime(reader["SignOutTime"]);
-                        existingProxy = reader["ProxySignEmployeeNo"] is DBNull ? "" : reader["ProxySignEmployeeNo"].ToString()?.Trim() ?? "";
+                        existingProxy = reader["ProxyUser"] is DBNull ? "" : reader["ProxyUser"].ToString()?.Trim() ?? "";
                     }
                 }
 
@@ -566,16 +566,16 @@ internal static class AttendanceEndpoints
 
                     await using var insert = new SqlCommand("""
                         INSERT dbo.MeetingAttendance
-                            (ParticipantID, SignInTime, SignOutTime, ProxySignEmployeeNo, UpdatedByEmployeeNo, UpdatedTime)
+                            (ParticipantID, SignInTime, SignOutTime, ProxyUser, UpdateUser, UpdateTime)
                         VALUES
-                            (@ParticipantID, dbo.AppNow(), NULL, @Proxy, @UpdatedBy, dbo.AppNow());
+                            (@ParticipantID, dbo.fn_Now(), NULL, @Proxy, @UpdateUser, dbo.fn_Now());
 
                         -- 人到了，事前登記的未出席原因就不再適用。
                         UPDATE dbo.MeetingParticipant SET AbsenceReason = NULL WHERE ParticipantID = @ParticipantID;
                         """, connection, tx);
                     insert.Parameters.Add("@ParticipantID", SqlDbType.Int).Value = participantId.Value;
                     insert.Parameters.Add("@Proxy", SqlDbType.VarChar, 20).Value = (object?)proxyEmployeeNo ?? DBNull.Value;
-                    insert.Parameters.Add("@UpdatedBy", SqlDbType.VarChar, 20).Value = (object?)updatedBy ?? DBNull.Value;
+                    insert.Parameters.Add("@UpdateUser", SqlDbType.VarChar, 20).Value = (object?)updateUser ?? DBNull.Value;
                     await insert.ExecuteNonQueryAsync();
                 }
                 else
@@ -584,21 +584,21 @@ internal static class AttendanceEndpoints
                         throw new InvalidOperationException("尚未簽到，不能簽退。");
                     if (existingSignOut.HasValue)
                         throw new InvalidOperationException("此人員已完成簽退，請重新整理名單。");
-                    if (isProxyOperation && !string.Equals(existingProxy, updatedBy, StringComparison.OrdinalIgnoreCase))
+                    if (isProxyOperation && !string.Equals(existingProxy, updateUser, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("此人員不是由您代簽，只有原代簽人可以代為簽退。");
 
                     await using var update = new SqlCommand("""
                         UPDATE dbo.MeetingAttendance
-                        SET SignOutTime = dbo.AppNow(),
-                            ProxySignEmployeeNo = @Proxy,
-                            UpdatedByEmployeeNo = @UpdatedBy, UpdatedTime = dbo.AppNow()
+                        SET SignOutTime = dbo.fn_Now(),
+                            ProxyUser = @Proxy,
+                            UpdateUser = @UpdateUser, UpdateTime = dbo.fn_Now()
                         WHERE ParticipantID = @ParticipantID
                           AND SignOutTime IS NULL;
                         """, connection, tx);
                     update.Parameters.Add("@ParticipantID", SqlDbType.Int).Value = participantId.Value;
                     var proxyToKeep = string.IsNullOrWhiteSpace(existingProxy) ? proxyEmployeeNo : existingProxy;
                     update.Parameters.Add("@Proxy", SqlDbType.VarChar, 20).Value = (object?)proxyToKeep ?? DBNull.Value;
-                    update.Parameters.Add("@UpdatedBy", SqlDbType.VarChar, 20).Value = (object?)updatedBy ?? DBNull.Value;
+                    update.Parameters.Add("@UpdateUser", SqlDbType.VarChar, 20).Value = (object?)updateUser ?? DBNull.Value;
                     if (await update.ExecuteNonQueryAsync() != 1)
                         throw new InvalidOperationException("簽退狀態已被其他人更新，請重新整理名單。");
                 }
@@ -609,7 +609,7 @@ internal static class AttendanceEndpoints
             catch (Exception ex) when (!IsDeadlock(ex))
             {
                 await tx.RollbackAsync();
-                return Results.Json(new { success = false, message = CleanDatabaseMessage(ex) }, statusCode: 400);
+                return Results.Json(new { success = false, message = GetErrorMessage(ex) }, statusCode: 400);
             }
         });
     }

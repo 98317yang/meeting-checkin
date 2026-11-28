@@ -81,7 +81,7 @@ internal static class LineEndpoints
         // 身分一律由後端向 LINE 驗證 ID Token 取得，網址不再夾帶使用者代號。
         // 取得的 LINE 使用者代號對應 LineDB.dbo.UserInfo.UserID，不是員工編號 SNTOPID。
         app.MapPost("/api/liff/meeting/authorize", async (
-            LiffMeetingAuthorizeRequest request,
+            LiffAuthRequest request,
             IDataProtectionProvider dataProtectionProvider,
             IHttpClientFactory httpClientFactory,
             IConfiguration configuration) =>
@@ -135,16 +135,16 @@ internal static class LineEndpoints
             const string meetingSql = """
                 SELECT TOP (1)
                     m.MeetingNo, m.MeetingName, m.MeetingSubName,
-                    m.StartDateTime, m.EndDateTime,
+                    m.StartTime, m.EndTime,
                     m.LocationType, m.RoomID, m.CustomLocation,
-                    m.Host1EmployeeNo, m.Host2EmployeeNo, m.Host3EmployeeNo,
-                    m.CreatedByEmployeeNo, m.Description,
-                    ISNULL(m.AllowUnlistedParticipants, 0) AS AllowUnlistedParticipants,
-                    ISNULL(m.ExpectedParticipantCount, 0) AS ExpectedParticipantCount,
+                    m.Host1, m.Host2, m.Host3,
+                    m.CreateUser, m.Description,
+                    ISNULL(m.AllowWalkIn, 0) AS AllowWalkIn,
+                    ISNULL(m.ExpectedCount, 0) AS ExpectedCount,
                     CASE
                         WHEN NULLIF(@EmployeeNo, '') IS NOT NULL AND
-                             (@EmployeeNo = m.CreatedByEmployeeNo
-                              OR @EmployeeNo IN (m.Host1EmployeeNo, m.Host2EmployeeNo, m.Host3EmployeeNo)) THEN N'host'
+                             (@EmployeeNo = m.CreateUser
+                              OR @EmployeeNo IN (m.Host1, m.Host2, m.Host3)) THEN N'host'
                         WHEN NULLIF(@EmployeeNo, '') IS NOT NULL AND EXISTS (
                             SELECT 1 FROM dbo.MeetingParticipant p
                             WHERE p.MeetingNo = m.MeetingNo
@@ -165,10 +165,10 @@ internal static class LineEndpoints
                 return Results.NotFound(new { success = false, code = "MEETING_NOT_FOUND", message = "此 QR Code 無效或找不到會議資料。" });
 
             var relation = meetingReader["Relation"].ToString() ?? "none";
-            var allowUnlistedParticipants = Convert.ToBoolean(meetingReader["AllowUnlistedParticipants"]);
-            var expectedParticipantCount = Convert.ToInt32(meetingReader["ExpectedParticipantCount"]);
+            var allowWalkIn = Convert.ToBoolean(meetingReader["AllowWalkIn"]);
+            var expectedCount = Convert.ToInt32(meetingReader["ExpectedCount"]);
 
-            if (!linkedInternalUser && !allowUnlistedParticipants)
+            if (!linkedInternalUser && !allowWalkIn)
             {
                 return Results.Json(new
                 {
@@ -178,15 +178,15 @@ internal static class LineEndpoints
                 }, statusCode: 403);
             }
 
-            if (linkedInternalUser && relation == "none" && !allowUnlistedParticipants)
+            if (linkedInternalUser && relation == "none" && !allowWalkIn)
                 return Results.Json(new { success = false, code = "NOT_INVITED", message = "本會議不允許非指定名單人員加入。" }, statusCode: 403);
-            if (linkedInternalUser && relation == "none" && allowUnlistedParticipants)
+            if (linkedInternalUser && relation == "none" && allowWalkIn)
                 relation = "guest";
             if (!linkedInternalUser)
                 relation = "externalGuest";
 
-            var start = Convert.ToDateTime(meetingReader["StartDateTime"]);
-            var end = Convert.ToDateTime(meetingReader["EndDateTime"]);
+            var start = Convert.ToDateTime(meetingReader["StartTime"]);
+            var end = Convert.ToDateTime(meetingReader["EndTime"]);
             var locationType = Convert.ToInt32(meetingReader["LocationType"]);
             var roomId = meetingReader["RoomID"] is DBNull ? "" : meetingReader["RoomID"].ToString();
             var customLocation = meetingReader["CustomLocation"] is DBNull ? "" : meetingReader["CustomLocation"].ToString();
@@ -195,9 +195,9 @@ internal static class LineEndpoints
             var meetingSubName = meetingReader["MeetingSubName"] is DBNull ? "" : meetingReader["MeetingSubName"].ToString() ?? "";
             var note = meetingReader["Description"] is DBNull ? "" : meetingReader["Description"].ToString() ?? "";
             await meetingReader.CloseAsync();
-            var location = await ResolveLocationDisplay(meetingConnection, locationType, roomId, customLocation);
+            var location = await GetLocationName(meetingConnection, locationType, roomId, customLocation);
 
-            if (AppClock.Now > end.AddMinutes(CheckInRules.CloseMinutesAfterEnd))
+            if (TaipeiTime.Now > end.AddMinutes(SignInRule.CloseMinutesAfterEnd))
             {
                 return Results.Json(new
                 {
@@ -207,7 +207,7 @@ internal static class LineEndpoints
                 }, statusCode: StatusCodes.Status410Gone);
             }
 
-            var sessionEmployeeNo = linkedInternalUser ? employeeNo : CreateGuestKey(effectiveUserId);
+            var sessionEmployeeNo = linkedInternalUser ? employeeNo : MakeGuestKey(effectiveUserId);
 
             // 訪客再次掃碼（例如回來簽退）時帶入上次填寫的資料，不必重填。
             // 以前每次都要重填，只要和第一次打得不一樣，就會找不到原本的簽到紀錄。
@@ -217,16 +217,16 @@ internal static class LineEndpoints
             var guestTitle = guestProfile?.Title;
 
             var requiresProfile = !linkedInternalUser && guestProfile is null;
-            var mobileSession = CreateMobileMeetingSession(
+            var mobileSession = CreateMobileSession(
                 dataProtectionProvider,
                 linkedInternalUser ? 1 : 2,
                 sessionEmployeeNo,
                 meetingNo,
                 request.MeetingToken.Trim(),
                 end,
-                externalName: guestName,
-                externalOrganization: guestOrganization,
-                externalTitle: guestTitle);
+                guestName: guestName,
+                guestOrg: guestOrganization,
+                guestTitle: guestTitle);
 
             return Results.Ok(new
             {
@@ -260,14 +260,14 @@ internal static class LineEndpoints
                     date = start.ToString("yyyy-MM-dd"),
                     start = start.ToString("HH:mm"),
                     end = end.ToString("HH:mm"),
-                    checkInOpenAt = start.AddMinutes(-CheckInRules.OpenMinutesBeforeStart).ToString("yyyy-MM-ddTHH:mm:ss"),
+                    checkInOpenAt = start.AddMinutes(-SignInRule.OpenMinutesBeforeStart).ToString("yyyy-MM-ddTHH:mm:ss"),
                     startDateTime = start.ToString("yyyy-MM-ddTHH:mm:ss"),
                     endDateTime = end.ToString("yyyy-MM-ddTHH:mm:ss"),
                     location,
                     note,
                     relation,
-                    allowUnlistedParticipants,
-                    expectedParticipantCount,
+                    allowWalkIn,
+                    expectedCount,
                     requiresProfile
                 }
             });
@@ -281,11 +281,11 @@ internal static class LineEndpoints
             IDataProtectionProvider dataProtectionProvider,
             IConfiguration configuration) =>
         {
-            if (!TryReadMobileMeetingSession(httpRequest, dataProtectionProvider, out var mobileSession))
-                return MobileSessionUnauthorized();
+            if (!TryReadMobileSession(httpRequest, dataProtectionProvider, out var mobileSession))
+                return SessionExpired();
             if (!string.Equals(mobileSession!.MeetingNo, meetingNo.Trim(), StringComparison.OrdinalIgnoreCase)
                 || mobileSession.ParticipantType != 2)
-                return MobileSessionUnauthorized();
+                return SessionExpired();
 
             var name = request.Name?.Trim() ?? "";
             var organization = request.Organization?.Trim() ?? "";
@@ -304,7 +304,7 @@ internal static class LineEndpoints
                     DateTime endTime;
                     bool allowOpen;
                     await using (var meetingCommand = new SqlCommand("""
-                        SELECT EndDateTime, ISNULL(AllowUnlistedParticipants, 0)
+                        SELECT EndTime, ISNULL(AllowWalkIn, 0)
                         FROM dbo.Meeting WITH (UPDLOCK, HOLDLOCK)
                         WHERE MeetingNo = @MeetingNo AND QRCode = @Token AND ISNULL(IsDeleted,0)=0;
                         """, connection, tx))
@@ -318,7 +318,7 @@ internal static class LineEndpoints
                     }
                     if (!allowOpen)
                         throw new InvalidOperationException("此會議不允許非名單人員加入。");
-                    if (AppClock.Now > endTime.AddMinutes(CheckInRules.CloseMinutesAfterEnd))
+                    if (TaipeiTime.Now > endTime.AddMinutes(SignInRule.CloseMinutesAfterEnd))
                         throw new InvalidOperationException("此會議已結束，無法再建立簽到資料。");
 
                     // 訪客以 GuestKey（LINE 使用者代號的單向雜湊）識別，每場會議一位訪客只有一列。
@@ -326,18 +326,18 @@ internal static class LineEndpoints
                     // UX_MeetingParticipant_Guest 唯一索引確保連點兩次也不會建立兩筆。
                     const string upsertSql = """
                         UPDATE dbo.MeetingParticipant WITH (UPDLOCK, HOLDLOCK)
-                        SET ExternalName = @Name,
-                            ExternalOrganization = @Organization,
-                            ExternalTitle = @Title,
-                            UpdatedTime = dbo.AppNow()
+                        SET GuestName = @Name,
+                            GuestOrg = @Organization,
+                            GuestTitle = @Title,
+                            UpdateTime = dbo.fn_Now()
                         WHERE MeetingNo = @MeetingNo AND GuestKey = @GuestKey;
 
                         IF @@ROWCOUNT = 0
                             INSERT dbo.MeetingParticipant
                                 (MeetingNo, ParticipantType, Source, GuestKey,
-                                 ExternalName, ExternalOrganization, ExternalTitle, CreatedTime)
+                                 GuestName, GuestOrg, GuestTitle, CreateTime)
                             VALUES
-                                (@MeetingNo, 2, 3, @GuestKey, @Name, @Organization, @Title, dbo.AppNow());
+                                (@MeetingNo, 2, 3, @GuestKey, @Name, @Organization, @Title, dbo.fn_Now());
                         """;
                     await using var upsert = new SqlCommand(upsertSql, connection, tx);
                     upsert.Parameters.Add("@MeetingNo", SqlDbType.VarChar, 20).Value = meetingNo.Trim();
@@ -348,7 +348,7 @@ internal static class LineEndpoints
                     await upsert.ExecuteNonQueryAsync();
                     await tx.CommitAsync();
 
-                    var refreshedSession = CreateMobileMeetingSession(
+                    var refreshedSession = CreateMobileSession(
                         dataProtectionProvider, 2, mobileSession.EmployeeNo, meetingNo.Trim(), mobileSession.MeetingToken,
                         endTime, name, organization, title);
 
@@ -375,7 +375,7 @@ internal static class LineEndpoints
                 catch (Exception ex) when (!IsDeadlock(ex))
                 {
                     await tx.RollbackAsync();
-                    return Results.Json(new { success = false, message = CleanDatabaseMessage(ex) }, statusCode: 400);
+                    return Results.Json(new { success = false, message = GetErrorMessage(ex) }, statusCode: 400);
                 }
             });
         }).AllowAnonymous();
@@ -394,10 +394,10 @@ internal static class LineEndpoints
                 await using var connection = new SqlConnection(GetConnection(configuration, "LineMeetingDb"));
                 await connection.OpenAsync();
                 const string sql = """
-                    SELECT TOP (1) MeetingNo, MeetingName, MeetingSubName, StartDateTime, EndDateTime,
+                    SELECT TOP (1) MeetingNo, MeetingName, MeetingSubName, StartTime, EndTime,
                            LocationType, RoomID, CustomLocation, Description,
-                           ISNULL(AllowUnlistedParticipants,0) AS AllowUnlistedParticipants,
-                           ISNULL(ExpectedParticipantCount,0) AS ExpectedParticipantCount
+                           ISNULL(AllowWalkIn,0) AS AllowWalkIn,
+                           ISNULL(ExpectedCount,0) AS ExpectedCount
                     FROM dbo.Meeting
                     WHERE QRCode=@Token AND ISNULL(IsDeleted,0)=0;
                     """;
@@ -406,33 +406,33 @@ internal static class LineEndpoints
                 await using var reader = await command.ExecuteReaderAsync();
                 if (!await reader.ReadAsync())
                     return Results.NotFound(new { success = false, message = "找不到此 Meeting Token 對應的會議。" });
-                if (!Convert.ToBoolean(reader["AllowUnlistedParticipants"]))
+                if (!Convert.ToBoolean(reader["AllowWalkIn"]))
                     return Results.BadRequest(new { success = false, message = "此會議未開放非名單人員加入，無法測試未綁定 UserID 流程。" });
 
                 var meetingNo = reader["MeetingNo"].ToString() ?? "";
                 var meetingName = reader["MeetingName"].ToString() ?? "";
                 var meetingSubName = reader["MeetingSubName"] is DBNull ? "" : reader["MeetingSubName"].ToString() ?? "";
-                var start = Convert.ToDateTime(reader["StartDateTime"]);
-                var end = Convert.ToDateTime(reader["EndDateTime"]);
+                var start = Convert.ToDateTime(reader["StartTime"]);
+                var end = Convert.ToDateTime(reader["EndTime"]);
                 var locationType = Convert.ToInt32(reader["LocationType"]);
                 var roomId = reader["RoomID"] is DBNull ? "" : reader["RoomID"].ToString();
                 var customLocation = reader["CustomLocation"] is DBNull ? "" : reader["CustomLocation"].ToString();
                 var note = reader["Description"] is DBNull ? "" : reader["Description"].ToString() ?? "";
-                var expectedParticipantCount = Convert.ToInt32(reader["ExpectedParticipantCount"]);
+                var expectedCount = Convert.ToInt32(reader["ExpectedCount"]);
                 await reader.CloseAsync();
-                var location = await ResolveLocationDisplay(connection, locationType, roomId, customLocation);
+                var location = await GetLocationName(connection, locationType, roomId, customLocation);
 
                 var devLineUserId = "UDEVUNLINKED000000000000000000001";
-                var guestKey = CreateGuestKey(devLineUserId);
+                var guestKey = MakeGuestKey(devLineUserId);
                 var guestProfile = await FindGuestProfile(connection, meetingNo, guestKey);
                 var requiresProfile = guestProfile is null;
-                var session = CreateMobileMeetingSession(dataProtectionProvider, 2, guestKey, meetingNo, meetingToken, end,
+                var session = CreateMobileSession(dataProtectionProvider, 2, guestKey, meetingNo, meetingToken, end,
                     guestProfile?.Name, guestProfile?.Organization, guestProfile?.Title);
                 return Results.Ok(new
                 {
                     success = true, requiresProfile, mobileSession = session,
                     user = new { lineUserId = devLineUserId, employeeNo = guestKey, employeeId = guestKey, userID = devLineUserId, name = guestProfile?.Name ?? "", department = guestProfile?.Organization ?? "", title = guestProfile?.Title ?? "", participantType = "External", requiresProfile },
-                    meeting = new { meetingNo, id = meetingNo, name = meetingName, subName = meetingSubName, date = start.ToString("yyyy-MM-dd"), start = start.ToString("HH:mm"), end = end.ToString("HH:mm"), checkInOpenAt = start.AddMinutes(-CheckInRules.OpenMinutesBeforeStart).ToString("yyyy-MM-ddTHH:mm:ss"), startDateTime = start.ToString("yyyy-MM-ddTHH:mm:ss"), endDateTime = end.ToString("yyyy-MM-ddTHH:mm:ss"), location, note, relation = "externalGuest", allowUnlistedParticipants = true, expectedParticipantCount, requiresProfile }
+                    meeting = new { meetingNo, id = meetingNo, name = meetingName, subName = meetingSubName, date = start.ToString("yyyy-MM-dd"), start = start.ToString("HH:mm"), end = end.ToString("HH:mm"), checkInOpenAt = start.AddMinutes(-SignInRule.OpenMinutesBeforeStart).ToString("yyyy-MM-ddTHH:mm:ss"), startDateTime = start.ToString("yyyy-MM-ddTHH:mm:ss"), endDateTime = end.ToString("yyyy-MM-ddTHH:mm:ss"), location, note, relation = "externalGuest", allowWalkIn = true, expectedCount, requiresProfile }
                 });
             }).AllowAnonymous();
 
@@ -482,15 +482,15 @@ internal static class LineEndpoints
                 const string meetingSql = """
                     SELECT TOP (1)
                         m.MeetingNo, m.MeetingName, m.MeetingSubName,
-                        m.StartDateTime, m.EndDateTime,
+                        m.StartTime, m.EndTime,
                         m.LocationType, m.RoomID, m.CustomLocation,
-                        m.Host1EmployeeNo, m.Host2EmployeeNo, m.Host3EmployeeNo,
-                        m.CreatedByEmployeeNo, m.Description,
-                        ISNULL(m.AllowUnlistedParticipants, 0) AS AllowUnlistedParticipants,
-                        ISNULL(m.ExpectedParticipantCount, 0) AS ExpectedParticipantCount,
+                        m.Host1, m.Host2, m.Host3,
+                        m.CreateUser, m.Description,
+                        ISNULL(m.AllowWalkIn, 0) AS AllowWalkIn,
+                        ISNULL(m.ExpectedCount, 0) AS ExpectedCount,
                         CASE
-                            WHEN @EmployeeNo = m.CreatedByEmployeeNo
-                              OR @EmployeeNo IN (m.Host1EmployeeNo, m.Host2EmployeeNo, m.Host3EmployeeNo) THEN N'host'
+                            WHEN @EmployeeNo = m.CreateUser
+                              OR @EmployeeNo IN (m.Host1, m.Host2, m.Host3) THEN N'host'
                             WHEN EXISTS (
                                 SELECT 1 FROM dbo.MeetingParticipant p
                                 WHERE p.MeetingNo = m.MeetingNo
@@ -511,13 +511,13 @@ internal static class LineEndpoints
                     return Results.NotFound(new { success = false, message = "找不到此 Meeting Token 對應的會議。" });
 
                 var relation = meetingReader["Relation"].ToString() ?? "none";
-                var allowUnlistedParticipants = Convert.ToBoolean(meetingReader["AllowUnlistedParticipants"]);
-                if (relation == "none" && !allowUnlistedParticipants)
+                var allowWalkIn = Convert.ToBoolean(meetingReader["AllowWalkIn"]);
+                if (relation == "none" && !allowWalkIn)
                     return Results.Json(new { success = false, message = "此測試員工不在本次會議名單中。" }, statusCode: 403);
                 if (relation == "none") relation = "guest";
 
-                var start = Convert.ToDateTime(meetingReader["StartDateTime"]);
-                var end = Convert.ToDateTime(meetingReader["EndDateTime"]);
+                var start = Convert.ToDateTime(meetingReader["StartTime"]);
+                var end = Convert.ToDateTime(meetingReader["EndTime"]);
                 var locationType = Convert.ToInt32(meetingReader["LocationType"]);
                 var roomId = meetingReader["RoomID"] is DBNull ? "" : meetingReader["RoomID"].ToString();
                 var customLocation = meetingReader["CustomLocation"] is DBNull ? "" : meetingReader["CustomLocation"].ToString();
@@ -525,11 +525,11 @@ internal static class LineEndpoints
                 var meetingName = meetingReader["MeetingName"].ToString() ?? "";
                 var meetingSubName = meetingReader["MeetingSubName"] is DBNull ? "" : meetingReader["MeetingSubName"].ToString() ?? "";
                 var note = meetingReader["Description"] is DBNull ? "" : meetingReader["Description"].ToString() ?? "";
-                var expectedParticipantCount = Convert.ToInt32(meetingReader["ExpectedParticipantCount"]);
+                var expectedCount = Convert.ToInt32(meetingReader["ExpectedCount"]);
                 await meetingReader.CloseAsync();
-                var location = await ResolveLocationDisplay(meetingConnection, locationType, roomId, customLocation);
+                var location = await GetLocationName(meetingConnection, locationType, roomId, customLocation);
 
-                var mobileSession = CreateMobileMeetingSession(dataProtectionProvider, 1, employeeNo, meetingNo, meetingToken, end);
+                var mobileSession = CreateMobileSession(dataProtectionProvider, 1, employeeNo, meetingNo, meetingToken, end);
                 return Results.Ok(new
                 {
                     success = true,
@@ -557,14 +557,14 @@ internal static class LineEndpoints
                         date = start.ToString("yyyy-MM-dd"),
                         start = start.ToString("HH:mm"),
                         end = end.ToString("HH:mm"),
-                        checkInOpenAt = start.AddMinutes(-CheckInRules.OpenMinutesBeforeStart).ToString("yyyy-MM-ddTHH:mm:ss"),
+                        checkInOpenAt = start.AddMinutes(-SignInRule.OpenMinutesBeforeStart).ToString("yyyy-MM-ddTHH:mm:ss"),
                         startDateTime = start.ToString("yyyy-MM-ddTHH:mm:ss"),
                         endDateTime = end.ToString("yyyy-MM-ddTHH:mm:ss"),
                         location,
                         note,
                         relation,
-                        allowUnlistedParticipants,
-                        expectedParticipantCount,
+                        allowWalkIn,
+                        expectedCount,
                         meetingToken
                     }
                 });

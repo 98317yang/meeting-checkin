@@ -6,16 +6,16 @@ let meetingId = params.get('meeting') || params.get('id');
 const meetingToken = (params.get('token') || '').trim();
 
 let mobileSession = sessionStorage.getItem('meetingMobileSession') || '';
-let authorizedUserRaw = sessionStorage.getItem('meetingLoginUser') || '';
-let authorizedMeetingRaw = sessionStorage.getItem('meetingLiffMeeting') || '';
+let userJson = sessionStorage.getItem('meetingLoginUser') || '';
+let meetingJson = sessionStorage.getItem('meetingLiffMeeting') || '';
 
-function readAuthorizedLiffSession() {
+function readLiffSession() {
   if (
     !['liff', 'dev'].includes(source) ||
     !meetingToken ||
     !mobileSession ||
-    !authorizedUserRaw ||
-    !authorizedMeetingRaw
+    !userJson ||
+    !meetingJson
   ) {
     return {
       ok: false,
@@ -24,8 +24,8 @@ function readAuthorizedLiffSession() {
   }
 
   try {
-    const authorizedUser = JSON.parse(authorizedUserRaw);
-    const authorizedMeeting = JSON.parse(authorizedMeetingRaw);
+    const authorizedUser = JSON.parse(userJson);
+    const authorizedMeeting = JSON.parse(meetingJson);
     const authorizedToken = String(authorizedMeeting.meetingToken || '').trim();
 
     if (
@@ -43,9 +43,9 @@ function readAuthorizedLiffSession() {
   }
 }
 
-let authorizedSession = readAuthorizedLiffSession();
+let authorizedSession = readLiffSession();
 
-async function bootstrapDevelopmentSession() {
+async function devLogin() {
   if (source !== 'dev') return true;
   if (!meetingToken || (!testEmployeeId && !testGuest)) {
     renderError('Development 測試模式需要 token，並指定 testEmployeeId 或 testGuest=1。');
@@ -62,12 +62,12 @@ async function bootstrapDevelopmentSession() {
       },
     );
     mobileSession = result.mobileSession || '';
-    authorizedUserRaw = JSON.stringify(result.user || {});
-    authorizedMeetingRaw = JSON.stringify({ ...result.meeting, meetingToken });
+    userJson = JSON.stringify(result.user || {});
+    meetingJson = JSON.stringify({ ...result.meeting, meetingToken });
     sessionStorage.setItem('meetingMobileSession', mobileSession);
-    sessionStorage.setItem('meetingLoginUser', authorizedUserRaw);
-    sessionStorage.setItem('meetingLiffMeeting', authorizedMeetingRaw);
-    authorizedSession = readAuthorizedLiffSession();
+    sessionStorage.setItem('meetingLoginUser', userJson);
+    sessionStorage.setItem('meetingLiffMeeting', meetingJson);
+    authorizedSession = readLiffSession();
     return authorizedSession.ok;
   } catch (e) {
     renderError(e.message || '無法建立 Development 手機測試 Session。');
@@ -95,10 +95,10 @@ let meeting = null,
   participants = [];
 let selectedInternalProxyEmployeeNo = '';
 let selectedExternalIndex = '';
-let mobileRefreshTimer = null;
-let attendanceRequestInFlight = false;
-let pageLoadInFlight = false;
-let guestFormDirty = false;
+let refreshTimer = null;
+let loadingAttendance = false;
+let loadingPage = false;
+let guestEdited = false;
 
 const userEmployeeNo = () =>
   String(
@@ -109,10 +109,10 @@ const isExternal = (row) => String(row.participantType || '').toLowerCase() === 
 const formatPerson = (row) => {
   if (isInternal(row))
     return `${row.name || row.employeeId || ''}${row.employeeId ? `（${row.employeeId}）` : ''}`;
-  return `${row.externalName || row.name || ''}${row.externalOrganization || row.organization ? `｜${row.externalOrganization || row.organization}` : ''}`;
+  return `${row.guestName || row.name || ''}${row.guestOrg || row.organization ? `｜${row.guestOrg || row.organization}` : ''}`;
 };
 
-function requiresGuestProfile() {
+function needGuestProfile() {
   return !!(
     authorizedSession?.user?.requiresProfile || authorizedSession?.meeting?.requiresProfile
   );
@@ -147,14 +147,14 @@ function renderGuestProfile() {
 
   document.querySelectorAll('#guestOrganization,#guestName,#guestTitle').forEach((input) => {
     input.addEventListener('input', () => {
-      guestFormDirty = true;
+      guestEdited = true;
     });
   });
   document.getElementById('guestProfileConfirm')?.addEventListener('click', saveGuestProfile);
 }
 
 async function saveGuestProfile() {
-  if (attendanceRequestInFlight) return;
+  if (loadingAttendance) return;
   const organization = (document.getElementById('guestOrganization')?.value || '').trim();
   const name = (document.getElementById('guestName')?.value || '').trim();
   const title = (document.getElementById('guestTitle')?.value || '').trim();
@@ -167,7 +167,7 @@ async function saveGuestProfile() {
   if (!confirmed) return;
   const meetingNo = authorizedSession.meeting?.meetingNo || authorizedSession.meeting?.id || '';
   if (!meetingNo) return renderError('找不到會議編號，請重新掃描 QR Code。');
-  attendanceRequestInFlight = true;
+  loadingAttendance = true;
   try {
     const result = await mobileApiJson(
       `api/meetings/${encodeURIComponent(meetingNo)}/guest-profile`,
@@ -186,28 +186,28 @@ async function saveGuestProfile() {
     sessionStorage.setItem('meetingMobileSession', mobileSession);
     sessionStorage.setItem('meetingLoginUser', JSON.stringify(nextUser));
     sessionStorage.setItem('meetingLiffMeeting', JSON.stringify({ ...nextMeeting, meetingToken }));
-    authorizedUserRaw = JSON.stringify(nextUser);
-    authorizedMeetingRaw = JSON.stringify({ ...nextMeeting, meetingToken });
+    userJson = JSON.stringify(nextUser);
+    meetingJson = JSON.stringify({ ...nextMeeting, meetingToken });
     authorizedSession = { ok: true, user: nextUser, meeting: nextMeeting };
     user = nextUser;
-    guestFormDirty = false;
+    guestEdited = false;
     await loadPage();
   } catch (e) {
     await showMobileNotice(e.message || '資料儲存失敗。', 'error');
   } finally {
-    attendanceRequestInFlight = false;
+    loadingAttendance = false;
   }
 }
 
 async function loadPage() {
   if (!authorizedSession.ok) return renderError(authorizedSession.message);
   if (!meetingToken) return renderError('缺少會議 QR Token');
-  if (requiresGuestProfile()) {
+  if (needGuestProfile()) {
     renderGuestProfile();
     return;
   }
-  if (pageLoadInFlight) return;
-  pageLoadInFlight = true;
+  if (loadingPage) return;
+  loadingPage = true;
   try {
     user = authorizedSession.user;
     const resolvedEmployeeNo = userEmployeeNo();
@@ -215,9 +215,9 @@ async function loadPage() {
       return renderError('尚未取得可用的簽到身分，請關閉此頁後重新掃描 QR Code。');
     }
 
-    const authorizedMeetingNo =
+    const liffMeetingNo =
       authorizedSession.meeting?.meetingNo || authorizedSession.meeting?.id || meetingId;
-    if (authorizedMeetingNo) meetingId = authorizedMeetingNo;
+    if (liffMeetingNo) meetingId = liffMeetingNo;
     const detailUrl = `api/meetings/by-token/${encodeURIComponent(meetingToken)}`;
     const attendancePromise = meetingId
       ? mobileApiJson(`api/meetings/${encodeURIComponent(meetingId)}/my-attendance`).catch(
@@ -241,7 +241,7 @@ async function loadPage() {
   } catch (e) {
     renderError(e.message || '無法載入會議資料');
   } finally {
-    pageLoadInFlight = false;
+    loadingPage = false;
   }
 }
 
@@ -252,14 +252,14 @@ function renderError(message) {
 }
 
 function render() {
-  const accessState = meetingAccessState(meeting);
+  const accessState = getAccess(meeting);
   const isHost = meeting.relation === 'host';
   const signedIn = !!attendance.signInTime;
   const signedOut = !!attendance.signOutTime;
   const employeeNo = userEmployeeNo();
-  const ownProxyEmployeeNo = String(attendance.proxyEmployeeNo || '').trim();
-  const ownWasProxySigned = !!ownProxyEmployeeNo;
-  const ownProxyName = attendance.proxyName || ownProxyEmployeeNo || '代理人';
+  const myProxyNo = String(attendance.proxyEmployeeNo || '').trim();
+  const selfProxySigned = !!myProxyNo;
+  const myProxyName = attendance.proxyName || myProxyNo || '代理人';
   const displayName = user.name || '未取得';
   const displayDepartment = user.dpcnm || user.department || '未取得';
   const displayTitle = user.dutnm || user.title || '未取得';
@@ -275,14 +275,14 @@ function render() {
 
   const internalRows = participants.filter(isInternal);
   const externalRows = participants.filter(isExternal);
-  const canProxyOperate = (row) =>
+  const canProxy = (row) =>
     !row.signInTime || String(row.proxyEmployeeNo || '').trim() === employeeNo;
-  const internalProxyRows = internalRows.filter(
-    (row) => String(row.employeeId || '') !== employeeNo && canProxyOperate(row),
+  const staffProxyRows = internalRows.filter(
+    (row) => String(row.employeeId || '') !== employeeNo && canProxy(row),
   );
-  const externalProxyIndexes = externalRows
+  const guestProxyIndexes = externalRows
     .map((row, index) => ({ row, index }))
-    .filter((x) => canProxyOperate(x.row));
+    .filter((x) => canProxy(x.row));
 
   mobileContent.innerHTML = `
         <section class="mobile-meeting-hero">
@@ -302,14 +302,14 @@ function render() {
             <div><span>簽退時間</span><strong>${esc(attendance.signOutTime || '尚未簽退')}</strong></div>
           </div>
           <div class="mobile-actions primary-mobile-actions">
-            <button id="checkInBtn" class="mobile-action-btn checkin" type="button" ${ownWasProxySigned || signedIn || accessState !== 'open' ? 'disabled' : ''}>${ownWasProxySigned ? '已由代理人簽到' : signedIn ? '已完成簽到' : '簽到'}</button>
-            <button id="checkOutBtn" class="mobile-action-btn checkout" type="button" ${ownWasProxySigned || !signedIn || signedOut ? 'disabled' : ''}>${ownWasProxySigned ? '由代理人簽退' : signedOut ? '已完成簽退' : '簽退'}</button>
+            <button id="checkInBtn" class="mobile-action-btn checkin" type="button" ${selfProxySigned || signedIn || accessState !== 'open' ? 'disabled' : ''}>${selfProxySigned ? '已由代理人簽到' : signedIn ? '已完成簽到' : '簽到'}</button>
+            <button id="checkOutBtn" class="mobile-action-btn checkout" type="button" ${selfProxySigned || !signedIn || signedOut ? 'disabled' : ''}>${selfProxySigned ? '由代理人簽退' : signedOut ? '已完成簽退' : '簽退'}</button>
           </div>
           <p class="mobile-help">${
-            ownWasProxySigned
+            selfProxySigned
               ? signedOut
-                ? `已由 ${esc(ownProxyName)}（${esc(ownProxyEmployeeNo)}）完成代簽到／簽退。`
-                : `已由 ${esc(ownProxyName)}（${esc(ownProxyEmployeeNo)}）代簽，請由原代簽人完成簽退。`
+                ? `已由 ${esc(myProxyName)}（${esc(myProxyNo)}）完成代簽到／簽退。`
+                : `已由 ${esc(myProxyName)}（${esc(myProxyNo)}）代簽，請由原代簽人完成簽退。`
               : accessState === 'pending'
                 ? '目前尚未開放簽到。'
                 : accessState === 'closed'
@@ -318,14 +318,14 @@ function render() {
           }</p>
         </section>
 
-        <section class="mobile-operation-card mobile-delegation-card ${meeting.allowUnlistedParticipants ? 'is-disabled' : ''}">
+        <section class="mobile-operation-card mobile-delegation-card ${meeting.allowWalkIn ? 'is-disabled' : ''}">
           <h2 class="mobile-section-heading">院內人員代簽</h2>
-          <p class="mobile-section-description">${meeting.allowUnlistedParticipants ? '此會議允許非名單人員加入，因此不可代簽。' : '所有本次會議的院內參與者皆可替其他院內人員代簽，系統會記錄實際操作人。'}</p>
+          <p class="mobile-section-description">${meeting.allowWalkIn ? '此會議允許非名單人員加入，因此不可代簽。' : '所有本次會議的院內參與者皆可替其他院內人員代簽，系統會記錄實際操作人。'}</p>
           <div class="field">
             <label for="internalProxyPerson">代簽對象</label>
-            <select id="internalProxyPerson" ${meeting.allowUnlistedParticipants ? 'disabled' : ''}>
+            <select id="internalProxyPerson" ${meeting.allowWalkIn ? 'disabled' : ''}>
               <option value="">請選擇院內參與者</option>
-              ${internalProxyRows
+              ${staffProxyRows
                 .map(
                   (row, index) => `
                 <option value="${esc(row.employeeId || '')}" data-index="${index}" ${String(row.employeeId || '') === selectedInternalProxyEmployeeNo ? 'selected' : ''}>
@@ -335,7 +335,7 @@ function render() {
                 .join('')}
             </select>
           </div>
-          <div id="internalProxyState" class="mobile-selection-state">${meeting.allowUnlistedParticipants ? '此會議不可代簽' : '請先選擇代簽對象。'}</div>
+          <div id="internalProxyState" class="mobile-selection-state">${meeting.allowWalkIn ? '此會議不可代簽' : '請先選擇代簽對象。'}</div>
           <div class="mobile-actions">
             <button id="internalProxySignIn" class="mobile-action-btn checkin" type="button" disabled>代為簽到</button>
             <button id="internalProxySignOut" class="mobile-action-btn checkout" type="button" disabled>代為簽退</button>
@@ -346,10 +346,10 @@ function render() {
       `;
 
   document.getElementById('checkInBtn')?.addEventListener('click', () => {
-    if (!ownWasProxySigned) saveOwnAttendance('signin');
+    if (!selfProxySigned) saveOwnAttendance('signin');
   });
   document.getElementById('checkOutBtn')?.addEventListener('click', () => {
-    if (!ownWasProxySigned)
+    if (!selfProxySigned)
       confirmAction(
         '確定要簽退嗎？',
         '簽退後無法再次於手機修改簽退時間。如需更正，請由主持人於簽到單調整。',
@@ -359,7 +359,7 @@ function render() {
 
   const internalSelect = document.getElementById('internalProxyPerson');
 
-  function refreshInternalProxyControls() {
+  function refreshProxyInputs() {
     const row = internalRows.find(
       (x) => String(x.employeeId || '') === String(internalSelect?.value || ''),
     );
@@ -367,7 +367,7 @@ function render() {
     const signInBtn = document.getElementById('internalProxySignIn');
     const signOutBtn = document.getElementById('internalProxySignOut');
 
-    if (meeting?.allowUnlistedParticipants) {
+    if (meeting?.allowWalkIn) {
       if (state) state.textContent = '此會議不可代簽';
       if (signInBtn) signInBtn.disabled = true;
       if (signOutBtn) signOutBtn.disabled = true;
@@ -394,9 +394,9 @@ function render() {
 
   internalSelect?.addEventListener('change', () => {
     selectedInternalProxyEmployeeNo = internalSelect.value || '';
-    refreshInternalProxyControls();
+    refreshProxyInputs();
   });
-  refreshInternalProxyControls();
+  refreshProxyInputs();
 
   document
     .getElementById('internalProxySignIn')
@@ -407,7 +407,7 @@ function render() {
 
   const externalSelect = document.getElementById('externalPerson');
 
-  function refreshExternalControls() {
+  function refreshGuestInputs() {
     const row = externalRows[Number(externalSelect?.value)];
     const state = document.getElementById('externalPersonState');
     const signInBtn = document.getElementById('externalSignIn');
@@ -415,7 +415,7 @@ function render() {
 
     if (!row || externalSelect?.value === '') {
       if (state)
-        state.textContent = externalProxyIndexes.length
+        state.textContent = guestProxyIndexes.length
           ? '請先選擇院外人員。'
           : '目前沒有可操作的院外人員。';
       if (signInBtn) signInBtn.disabled = true;
@@ -438,9 +438,9 @@ function render() {
 
   externalSelect?.addEventListener('change', () => {
     selectedExternalIndex = externalSelect.value;
-    refreshExternalControls();
+    refreshGuestInputs();
   });
-  refreshExternalControls();
+  refreshGuestInputs();
 
   document
     .getElementById('externalSignIn')
@@ -451,8 +451,8 @@ function render() {
 }
 
 async function saveOwnAttendance(action) {
-  if (attendanceRequestInFlight) return;
-  attendanceRequestInFlight = true;
+  if (loadingAttendance) return;
+  loadingAttendance = true;
   try {
     await mobileApiJson(`api/meetings/${encodeURIComponent(meetingId)}/attendance/${action}`, {
       method: 'POST',
@@ -468,13 +468,13 @@ async function saveOwnAttendance(action) {
   } catch (e) {
     showMobileNotice(e.message, 'error');
   } finally {
-    attendanceRequestInFlight = false;
+    loadingAttendance = false;
   }
 }
 
 async function saveInternalProxy(action) {
-  if (attendanceRequestInFlight) return;
-  if (meeting?.allowUnlistedParticipants) return showMobileNotice('此會議不可代簽。');
+  if (loadingAttendance) return;
+  if (meeting?.allowWalkIn) return showMobileNotice('此會議不可代簽。');
   const select = document.getElementById('internalProxyPerson');
   const employeeNo = select?.value || '';
   if (!employeeNo) return showMobileNotice('請先選擇院內代簽對象。');
@@ -486,7 +486,7 @@ async function saveInternalProxy(action) {
   if (action === 'signout' && row.signOutTime) return showMobileNotice('此人員已完成簽退。');
 
   const execute = async () => {
-    attendanceRequestInFlight = true;
+    loadingAttendance = true;
     try {
       await mobileApiJson(`api/meetings/${encodeURIComponent(meetingId)}/attendance/proxy`, {
         method: 'POST',
@@ -494,8 +494,8 @@ async function saveInternalProxy(action) {
           action,
           participantType: 'internal',
           participantEmployeeNo: employeeNo,
-          externalName: null,
-          externalOrganization: null,
+          guestName: null,
+          guestOrg: null,
           proxyEmployeeNo: userEmployeeNo(),
           operatedByEmployeeNo: userEmployeeNo(),
         }),
@@ -512,7 +512,7 @@ async function saveInternalProxy(action) {
       showMobileNotice(e.message, 'error');
       await loadPage();
     } finally {
-      attendanceRequestInFlight = false;
+      loadingAttendance = false;
     }
   };
   if (action === 'signout')
@@ -525,7 +525,7 @@ async function saveInternalProxy(action) {
 }
 
 async function saveExternalAttendance(action) {
-  if (attendanceRequestInFlight) return;
+  if (loadingAttendance) return;
   const select = document.getElementById('externalPerson');
   if (!select || select.value === '') return showMobileNotice('請先選擇院外人員。');
 
@@ -540,7 +540,7 @@ async function saveExternalAttendance(action) {
   if (action === 'signout' && row.signOutTime) return showMobileNotice('此院外人員已完成簽退。');
 
   const execute = async () => {
-    attendanceRequestInFlight = true;
+    loadingAttendance = true;
     try {
       await mobileApiJson(`api/meetings/${encodeURIComponent(meetingId)}/attendance/proxy`, {
         method: 'POST',
@@ -548,8 +548,8 @@ async function saveExternalAttendance(action) {
           action,
           participantType: 'external',
           participantEmployeeNo: null,
-          externalName: row.externalName || row.name,
-          externalOrganization: row.externalOrganization || row.organization,
+          guestName: row.guestName || row.name,
+          guestOrg: row.guestOrg || row.organization,
           proxyEmployeeNo: userEmployeeNo(),
           operatedByEmployeeNo: userEmployeeNo(),
         }),
@@ -568,7 +568,7 @@ async function saveExternalAttendance(action) {
       showMobileNotice(e.message, 'error');
       await loadPage();
     } finally {
-      attendanceRequestInFlight = false;
+      loadingAttendance = false;
     }
   };
 
@@ -617,20 +617,20 @@ function showMobileNotice(message, type = 'warning') {
 }
 
 function startMobileAutoRefresh() {
-  if (mobileRefreshTimer) clearInterval(mobileRefreshTimer);
-  mobileRefreshTimer = setInterval(() => {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => {
     if (
       !document.hidden &&
-      !attendanceRequestInFlight &&
-      !pageLoadInFlight &&
-      !guestFormDirty &&
+      !loadingAttendance &&
+      !loadingPage &&
+      !guestEdited &&
       !document.activeElement?.matches?.('#guestOrganization,#guestName,#guestTitle')
     )
       loadPage();
   }, 10000);
 }
 async function startMobilePage() {
-  const ok = await bootstrapDevelopmentSession();
+  const ok = await devLogin();
   if (!ok) return;
   await loadPage();
   startMobileAutoRefresh();
@@ -641,6 +641,5 @@ if (document.readyState === 'loading') {
   startMobilePage();
 }
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && !attendanceRequestInFlight && !pageLoadInFlight && !guestFormDirty)
-    loadPage();
+  if (!document.hidden && !loadingAttendance && !loadingPage && !guestEdited) loadPage();
 });

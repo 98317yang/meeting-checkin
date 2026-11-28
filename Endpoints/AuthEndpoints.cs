@@ -111,9 +111,9 @@ internal static class AuthEndpoints
                     await using var departmentReader = await departmentCommand.ExecuteReaderAsync();
                     while (await departmentReader.ReadAsync())
                     {
-                        var rowDepartmentId = ReaderText(departmentReader, "DPID", "DepartmentID", "DeptID");
+                        var rowDepartmentId = GetText(departmentReader, "DPID", "DepartmentID", "DeptID");
                         if (!rowDepartmentId.Equals(departmentId, StringComparison.OrdinalIgnoreCase)) continue;
-                        department = ReaderText(departmentReader, "DPCNM", "DepartmentName", "DeptName", "DPNM");
+                        department = GetText(departmentReader, "DPCNM", "DepartmentName", "DeptName", "DPNM");
                         break;
                     }
                 }
@@ -137,14 +137,14 @@ internal static class AuthEndpoints
                     await using var employeeReader = await employeeCommand.ExecuteReaderAsync();
                     while (await employeeReader.ReadAsync())
                     {
-                        var rowEmployeeId = ReaderText(employeeReader,
+                        var rowEmployeeId = GetText(employeeReader,
                             "SNTOPID", "OPID", "EmployeeNo", "EmployeeID", "UserID");
                         if (!rowEmployeeId.Equals(employeeId, StringComparison.OrdinalIgnoreCase)) continue;
 
-                        title = ReaderText(employeeReader, "DUTNM", "DutyName", "JobTitle", "Title");
+                        title = GetText(employeeReader, "DUTNM", "DutyName", "JobTitle", "Title");
                         if (string.IsNullOrWhiteSpace(department))
                         {
-                            department = ReaderText(employeeReader, "DPCNM", "DepartmentName", "DeptName", "DPNM");
+                            department = GetText(employeeReader, "DPCNM", "DepartmentName", "DeptName", "DPNM");
                         }
                         break;
                     }
@@ -241,7 +241,7 @@ internal static class AuthEndpoints
 
         // 前端可用來確認登入是否仍有效，以及目前登入的是誰。
         app.MapGet("/api/auth/me", (ClaimsPrincipal principal) =>
-            Results.Ok(new { success = true, employeeNo = CurrentEmployeeNo(principal), name = principal.Identity?.Name ?? "" }));
+            Results.Ok(new { success = true, employeeNo = GetUserId(principal), name = principal.Identity?.Name ?? "" }));
     }
 
 }

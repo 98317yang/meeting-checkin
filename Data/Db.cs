@@ -19,18 +19,18 @@ internal static class Db
     // 記錄「誰、從哪個畫面」修改簽到紀錄。資料庫的 TR_MeetingAttendance_Log 觸發程序
     // 會讀這兩個值寫進修改歷程。每個會寫入簽到紀錄的交易一開始都要呼叫一次；
     // 連線會被連線池重複使用，所以每次都明確設定（訪客自行操作時 employeeNo 為 null）。
-    internal static async Task SetAuditContext(SqlConnection connection, SqlTransaction tx, string? employeeNo, string source)
+    internal static async Task SetLogUser(SqlConnection connection, SqlTransaction tx, string? employeeNo, string source)
     {
         await using var command = new SqlCommand("""
             EXEC sys.sp_set_session_context @key = N'EmployeeNo', @value = @EmployeeNo;
-            EXEC sys.sp_set_session_context @key = N'ChangeSource', @value = @Source;
+            EXEC sys.sp_set_session_context @key = N'Source', @value = @Source;
             """, connection, tx);
         command.Parameters.Add("@EmployeeNo", SqlDbType.VarChar, 20).Value = string.IsNullOrWhiteSpace(employeeNo) ? DBNull.Value : employeeNo.Trim();
         command.Parameters.Add("@Source", SqlDbType.NVarChar, 20).Value = source;
         await command.ExecuteNonQueryAsync();
     }
 
-    internal static string ReaderText(SqlDataReader reader, params string[] candidates)
+    internal static string GetText(SqlDataReader reader, params string[] candidates)
     {
         foreach (var candidate in candidates)
         {
@@ -44,7 +44,7 @@ internal static class Db
         return "";
     }
 
-    internal static string CleanDatabaseMessage(Exception exception)
+    internal static string GetErrorMessage(Exception exception)
     {
         if (exception is SqlException sqlException)
         {
@@ -152,7 +152,7 @@ internal static class Db
         }
     }
 
-    internal static async Task<string> ResolveLocationDisplay(SqlConnection connection, int locationType, string? roomId, string? customLocation)
+    internal static async Task<string> GetLocationName(SqlConnection connection, int locationType, string? roomId, string? customLocation)
     {
         if (locationType == 0) return "無";
         if (locationType == 2)

@@ -16,7 +16,7 @@ initShell();
       const result = await apiJson(`api/meetings/${encodeURIComponent(id)}/attendance`);
       const allRows = result.rows || [];
       // 固定名單會議只統計名單內的人，和簽到名單、會議資料頁的規則一致。
-      const rows = meeting?.allowUnlistedParticipants
+      const rows = meeting?.allowWalkIn
         ? allRows
         : allRows.filter((r) => r.participantType !== 'External');
       signedInCount.textContent = rows.filter((x) => x.in).length;
@@ -37,9 +37,9 @@ initShell();
     if (m.relation !== 'host') throw new Error('您沒有權限查看此會議 QR Code。');
     qrImage.src = `api/qr-code/${encodeURIComponent(m.qrCode)}?v=20260811-rc1-pathfix`;
     info.innerHTML = `<p><b>日期時間：</b>${esc(m.date)} ${esc(m.start)}-${esc(m.end)}</p><p><b>地點：</b>${esc(m.location || '無')}</p><p><b>主持人：</b>${esc(Array.isArray(m.hosts) && m.hosts.length ? m.hosts.join('、') : m.host || '無')}</p><p><b>備註：</b>${esc(m.note || '無')}</p>`;
-    expectedStat.hidden = !!m.allowUnlistedParticipants;
+    expectedStat.hidden = !!m.allowWalkIn;
     const updateQrState = () => {
-      const state = meetingAccessState(m),
+      const state = getAccess(m),
         { openAt, end } = meetingWindow(m),
         hm = (d) =>
           `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;

@@ -54,9 +54,9 @@ jobs:
           ./sqlcmd.sh -U sa -P "$SA_PASSWORD" -d LineMeeting -Q "
             IF (SELECT COUNT(*) FROM dbo.Meeting) <> 4 THROW 50000, 'expected 4 demo meetings', 1;
             IF (SELECT COUNT(*) FROM dbo.MeetingAttendanceLog) = 0 THROW 50000, 'audit trigger wrote nothing', 1;
-            IF DATEDIFF(MINUTE, SYSUTCDATETIME(), dbo.AppNow()) NOT BETWEEN 479 AND 481 THROW 50000, 'AppNow is not UTC+8', 1;"
+            IF DATEDIFF(MINUTE, SYSUTCDATETIME(), dbo.fn_Now()) NOT BETWEEN 479 AND 481 THROW 50000, 'fn_Now is not UTC+8', 1;"
       - name: App account can use the Taipei clock
-        run: ./sqlcmd.sh -U meeting_app -P "$APP_PASSWORD" -d LineMeeting -Q "SELECT dbo.AppNow();"
+        run: ./sqlcmd.sh -U meeting_app -P "$APP_PASSWORD" -d LineMeeting -Q "SELECT dbo.fn_Now();"
       - name: App account cannot rewrite the audit log
         run: |
           if ./sqlcmd.sh -U meeting_app -P "$APP_PASSWORD" -d LineMeeting -Q "DELETE FROM dbo.MeetingAttendanceLog;"; then

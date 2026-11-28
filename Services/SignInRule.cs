@@ -1,7 +1,7 @@
 namespace MeetingCheckin;
 
 // 簽到／簽退的時間規則。開放與截止時間由設定檔決定（Program.cs 啟動時讀入）。
-public static class CheckInRules
+public static class SignInRule
 {
     // 開始前幾分鐘開放簽到（0 表示開始時間才開放）。
     public static int OpenMinutesBeforeStart { get; set; }
@@ -10,7 +10,7 @@ public static class CheckInRules
     public static int CloseMinutesAfterEnd { get; set; } = 30;
 
     // 回傳不能操作的原因；可以操作時回傳 null。action 為 "signin" 或 "signout"。
-    public static string? CheckWindow(string action, DateTime start, DateTime end, DateTime now)
+    public static string? CheckTime(string action, DateTime start, DateTime end, DateTime now)
     {
         var openAt = start.AddMinutes(-OpenMinutesBeforeStart);
         var closeAt = end.AddMinutes(CloseMinutesAfterEnd);

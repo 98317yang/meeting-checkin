@@ -13,10 +13,10 @@ const startKey = (m) => String(m.startDateTime || `${m.date}T${m.start}`);
 // 每張卡片本身會標示會議狀態。
 function sortedMeetings() {
   const active = allMeetings
-    .filter((m) => meetingAccessState(m) !== 'closed')
+    .filter((m) => getAccess(m) !== 'closed')
     .sort((a, b) => startKey(a).localeCompare(startKey(b)));
   const ended = allMeetings
-    .filter((m) => meetingAccessState(m) === 'closed')
+    .filter((m) => getAccess(m) === 'closed')
     .sort((a, b) => startKey(b).localeCompare(startKey(a)));
   return [...active, ...ended];
 }

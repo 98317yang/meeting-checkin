@@ -49,7 +49,7 @@ public class PermissionTests(ApiFactory factory)
             host1UserID = "10001",
             note,
             participantUserIDs = new[] { Demo.DoctorEmployeeNo },
-            allowUnlistedParticipants = false,
+            allowWalkIn = false,
             rowVersion = opened.GetProperty("rowVersion").GetString(),
         };
 

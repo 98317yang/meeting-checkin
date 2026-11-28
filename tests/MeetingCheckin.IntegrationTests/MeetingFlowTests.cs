@@ -44,7 +44,7 @@ public class MeetingFlowTests(ApiFactory factory)
         await using var connection = new SqlConnection(factory.LineMeetingConnectionString);
         await connection.OpenAsync();
         await using var command = new SqlCommand("""
-            SELECT l.Action, l.ChangedByEmployeeNo, l.ChangeSource
+            SELECT l.Action, l.ModifyUser, l.Source
             FROM dbo.MeetingAttendanceLog AS l
             JOIN dbo.MeetingParticipant AS p ON p.ParticipantID = l.ParticipantID
             WHERE p.MeetingNo = @MeetingNo AND p.EmployeeNo = @EmployeeNo;

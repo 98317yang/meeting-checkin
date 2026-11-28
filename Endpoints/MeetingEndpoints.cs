@@ -6,10 +6,10 @@ internal static class MeetingEndpoints
     {
         // 建立者一律是目前登入的人，不採用前端送來的 CurrentUserID。
         app.MapPost("/api/meetings", async (MeetingSaveRequest request, ClaimsPrincipal principal, IConfiguration configuration) =>
-            await SaveMeeting(request with { CurrentUserID = CurrentEmployeeNo(principal) }, null, configuration));
+            await SaveMeeting(request with { CurrentUserID = GetUserId(principal) }, null, configuration));
 
         app.MapPut("/api/meetings/{meetingNo}", async (string meetingNo, MeetingSaveRequest request, ClaimsPrincipal principal, IConfiguration configuration) =>
-            await SaveMeeting(request with { CurrentUserID = CurrentEmployeeNo(principal) }, meetingNo, configuration));
+            await SaveMeeting(request with { CurrentUserID = GetUserId(principal) }, meetingNo, configuration));
 
         app.MapGet("/api/meetings", async (
             ClaimsPrincipal principal,
@@ -18,7 +18,7 @@ internal static class MeetingEndpoints
             DateTime? endDate,
             IConfiguration configuration) =>
         {
-            var userId = CurrentEmployeeNo(principal);
+            var userId = GetUserId(principal);
             var list = new List<object>();
             await using var connection = new SqlConnection(GetConnection(configuration, "LineMeetingDb"));
             await connection.OpenAsync();
@@ -30,37 +30,37 @@ internal static class MeetingEndpoints
                      FROM dbo.RoomInfo ri
                      WHERE CONVERT(NVARCHAR(100), ri.{QuoteSqlName(roomColumns.IdColumn)}) = m.RoomID) AS RoomName,
                     m.MeetingNo, m.MeetingName, m.MeetingSubName,
-                    m.StartDateTime, m.EndDateTime,
+                    m.StartTime, m.EndTime,
                     m.LocationType, m.RoomID, m.CustomLocation,
-                    m.Host1EmployeeNo, m.Host2EmployeeNo, m.Host3EmployeeNo,
+                    m.Host1, m.Host2, m.Host3,
                     m.QRCode, m.Description,
-                    ISNULL(m.AllowUnlistedParticipants, 0) AS AllowUnlistedParticipants,
-                    ISNULL(m.ExpectedParticipantCount, 0) AS ExpectedParticipantCount,
-                    m.CreatedByEmployeeNo, m.CreatedTime, m.UpdatedByEmployeeNo, m.UpdatedTime,
-                    ISNULL(NULLIF(LTRIM(RTRIM(u1.CNM)), N''), m.Host1EmployeeNo) AS Host1Name,
-                    CASE WHEN NULLIF(LTRIM(RTRIM(m.Host2EmployeeNo)), '') IS NULL THEN N''
-                         ELSE ISNULL(NULLIF(LTRIM(RTRIM(u2.CNM)), N''), m.Host2EmployeeNo) END AS Host2Name,
-                    CASE WHEN NULLIF(LTRIM(RTRIM(m.Host3EmployeeNo)), '') IS NULL THEN N''
-                         ELSE ISNULL(NULLIF(LTRIM(RTRIM(u3.CNM)), N''), m.Host3EmployeeNo) END AS Host3Name,
+                    ISNULL(m.AllowWalkIn, 0) AS AllowWalkIn,
+                    ISNULL(m.ExpectedCount, 0) AS ExpectedCount,
+                    m.CreateUser, m.CreateTime, m.UpdateUser, m.UpdateTime,
+                    ISNULL(NULLIF(LTRIM(RTRIM(u1.CNM)), N''), m.Host1) AS Host1Name,
+                    CASE WHEN NULLIF(LTRIM(RTRIM(m.Host2)), '') IS NULL THEN N''
+                         ELSE ISNULL(NULLIF(LTRIM(RTRIM(u2.CNM)), N''), m.Host2) END AS Host2Name,
+                    CASE WHEN NULLIF(LTRIM(RTRIM(m.Host3)), '') IS NULL THEN N''
+                         ELSE ISNULL(NULLIF(LTRIM(RTRIM(u3.CNM)), N''), m.Host3) END AS Host3Name,
                     'host' AS Relation,
                     (SELECT COUNT(*) FROM dbo.MeetingParticipant p WHERE p.MeetingNo = m.MeetingNo) AS ParticipantCount,
-                    CAST(CASE WHEN m.CreatedByEmployeeNo = @User THEN 1 ELSE 0 END AS BIT) AS IsCreator,
+                    CAST(CASE WHEN m.CreateUser = @User THEN 1 ELSE 0 END AS BIT) AS IsCreator,
                     CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.MeetingParticipant hp JOIN dbo.MeetingAttendance ha ON ha.ParticipantID = hp.ParticipantID WHERE hp.MeetingNo = m.MeetingNo) THEN 1 ELSE 0 END AS BIT) AS HasAttendance
                 FROM dbo.Meeting m
-                LEFT JOIN LineDB.dbo.UserInfo u1 ON u1.SNTOPID = m.Host1EmployeeNo
-                LEFT JOIN LineDB.dbo.UserInfo u2 ON u2.SNTOPID = m.Host2EmployeeNo
-                LEFT JOIN LineDB.dbo.UserInfo u3 ON u3.SNTOPID = m.Host3EmployeeNo
+                LEFT JOIN LineDB.dbo.UserInfo u1 ON u1.SNTOPID = m.Host1
+                LEFT JOIN LineDB.dbo.UserInfo u2 ON u2.SNTOPID = m.Host2
+                LEFT JOIN LineDB.dbo.UserInfo u3 ON u3.SNTOPID = m.Host3
                 WHERE
                     ISNULL(m.IsDeleted, 0) = 0
                     AND
                     (
-                        @User IN (m.Host1EmployeeNo, m.Host2EmployeeNo, m.Host3EmployeeNo)
-                        OR m.CreatedByEmployeeNo = @User
+                        @User IN (m.Host1, m.Host2, m.Host3)
+                        OR m.CreateUser = @User
                     )
                     AND (@Keyword IS NULL OR m.MeetingName LIKE N'%' + @Keyword + N'%' OR m.MeetingNo LIKE '%' + @Keyword + '%')
-                    AND (@StartDate IS NULL OR m.StartDateTime >= @StartDate)
-                    AND (@EndDate IS NULL OR m.StartDateTime < DATEADD(DAY, 1, @EndDate))
-                ORDER BY m.StartDateTime DESC;
+                    AND (@StartDate IS NULL OR m.StartTime >= @StartDate)
+                    AND (@EndDate IS NULL OR m.StartTime < DATEADD(DAY, 1, @EndDate))
+                ORDER BY m.StartTime DESC;
                 """;
 
             await using var command = new SqlCommand(sql, connection);
@@ -82,11 +82,11 @@ internal static class MeetingEndpoints
             IDataProtectionProvider dataProtectionProvider,
             IConfiguration configuration) =>
         {
-            if (!TryReadMobileMeetingSession(httpRequest, dataProtectionProvider, out var mobileSession))
-                return MobileSessionUnauthorized();
+            if (!TryReadMobileSession(httpRequest, dataProtectionProvider, out var mobileSession))
+                return SessionExpired();
 
             if (!string.Equals(mobileSession!.MeetingToken, token.Trim(), StringComparison.Ordinal))
-                return MobileSessionUnauthorized();
+                return SessionExpired();
             if (await CheckMobileSessionAsync(mobileSession, configuration) is { } sessionProblem)
                 return sessionProblem;
 
@@ -99,24 +99,24 @@ internal static class MeetingEndpoints
                 return Results.NotFound(new { success = false, message = "QR Code 無效或找不到會議。" });
 
             if (!string.Equals(mobileSession.MeetingNo, meetingNo, StringComparison.OrdinalIgnoreCase))
-                return MobileSessionUnauthorized();
+                return SessionExpired();
 
             return await GetMeetingDetail(meetingNo, mobileSession.EmployeeNo, configuration);
         }).AllowAnonymous();
 
         app.MapGet("/api/meetings/{meetingNo}", async (string meetingNo, ClaimsPrincipal principal, IConfiguration configuration) =>
-            await GetMeetingDetail(meetingNo, CurrentEmployeeNo(principal), configuration));
+            await GetMeetingDetail(meetingNo, GetUserId(principal), configuration));
 
         app.MapDelete("/api/meetings/{meetingNo}", async (string meetingNo, ClaimsPrincipal principal, IConfiguration configuration) =>
         {
-            var userId = CurrentEmployeeNo(principal);
+            var userId = GetUserId(principal);
             await using var connection = new SqlConnection(GetConnection(configuration, "LineMeetingDb"));
             await connection.OpenAsync();
 
             // 只有建立者能刪除，而且已有人簽到的會議不能刪除，避免簽到紀錄跟著從畫面上消失。
             // 刪除是標記 IsDeleted，資料仍保留在資料庫。
             const string checkSql = """
-                SELECT m.CreatedByEmployeeNo,
+                SELECT m.CreateUser,
                        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.MeetingParticipant hp JOIN dbo.MeetingAttendance ha ON ha.ParticipantID = hp.ParticipantID WHERE hp.MeetingNo = m.MeetingNo) THEN 1 ELSE 0 END AS BIT) AS HasAttendance
                 FROM dbo.Meeting AS m
                 WHERE m.MeetingNo = @MeetingNo AND m.IsDeleted = 0;
@@ -127,7 +127,7 @@ internal static class MeetingEndpoints
                 await using var reader = await check.ExecuteReaderAsync();
                 if (!await reader.ReadAsync())
                     return Results.NotFound(new { success = false, message = "找不到會議。" });
-                if (!string.Equals(reader["CreatedByEmployeeNo"].ToString()?.Trim(), userId, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(reader["CreateUser"].ToString()?.Trim(), userId, StringComparison.OrdinalIgnoreCase))
                     return Results.Json(new { success = false, message = "只有會議建立者可以刪除會議。" }, statusCode: 403);
                 if (Convert.ToBoolean(reader["HasAttendance"]))
                     return Results.BadRequest(new { success = false, message = "已有人簽到的會議不能刪除。" });
@@ -137,14 +137,14 @@ internal static class MeetingEndpoints
             const string sql = """
                 UPDATE m
                 SET IsDeleted = 1,
-                    DeletedTime = dbo.AppNow(),
-                    DeletedByEmployeeNo = @User,
-                    UpdatedByEmployeeNo = @User,
-                    UpdatedTime = dbo.AppNow()
+                    DeleteTime = dbo.fn_Now(),
+                    DeleteUser = @User,
+                    UpdateUser = @User,
+                    UpdateTime = dbo.fn_Now()
                 FROM dbo.Meeting AS m
                 WHERE m.MeetingNo = @MeetingNo
                   AND m.IsDeleted = 0
-                  AND m.CreatedByEmployeeNo = @User
+                  AND m.CreateUser = @User
                   AND NOT EXISTS (SELECT 1 FROM dbo.MeetingParticipant hp
                                   JOIN dbo.MeetingAttendance ha ON ha.ParticipantID = hp.ParticipantID
                                   WHERE hp.MeetingNo = m.MeetingNo);
@@ -239,13 +239,13 @@ internal static class MeetingEndpoints
                 {
                     // 讀出目前的會議狀態並鎖定，用來判斷版本與修改限制。
                     const string checkSql = """
-                        SELECT m.RowVer, m.StartDateTime, m.EndDateTime, m.AllowUnlistedParticipants,
-                               m.Host1EmployeeNo, m.Host2EmployeeNo, m.Host3EmployeeNo,
+                        SELECT m.RowVer, m.StartTime, m.EndTime, m.AllowWalkIn,
+                               m.Host1, m.Host2, m.Host3,
                                CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.MeetingParticipant hp JOIN dbo.MeetingAttendance ha ON ha.ParticipantID = hp.ParticipantID WHERE hp.MeetingNo = m.MeetingNo) THEN 1 ELSE 0 END AS BIT) AS HasAttendance
                         FROM dbo.Meeting AS m WITH (UPDLOCK, HOLDLOCK)
                         WHERE m.MeetingNo = @MeetingNo
                           AND m.IsDeleted = 0
-                          AND @User IN (m.CreatedByEmployeeNo, m.Host1EmployeeNo, m.Host2EmployeeNo, m.Host3EmployeeNo);
+                          AND @User IN (m.CreateUser, m.Host1, m.Host2, m.Host3);
                         """;
                     await using var check = new SqlCommand(checkSql, connection, tx);
                     check.Parameters.Add("@MeetingNo", SqlDbType.VarChar, 20).Value = meetingNo!;
@@ -256,24 +256,24 @@ internal static class MeetingEndpoints
                             throw new InvalidOperationException("找不到會議，或您沒有修改權限。");
 
                         // 樂觀並行控制：編輯頁送回開啟時的版本。不同代表這段期間有人存過，避免互相覆蓋。
-                        if (MeetingEditRules.CheckVersion(request.RowVersion, Convert.ToBase64String((byte[])current["RowVer"])) is { } versionProblem)
+                        if (MeetingRule.CheckVersion(request.RowVersion, Convert.ToBase64String((byte[])current["RowVer"])) is { } versionProblem)
                             throw new InvalidOperationException(versionProblem);
 
                         static string? Slot(object value) => value is DBNull ? null : value.ToString();
-                        var originalEnd = Convert.ToDateTime(current["EndDateTime"]);
-                        var fieldProblem = MeetingEditRules.CheckMeetingFields(
+                        var originalEnd = Convert.ToDateTime(current["EndTime"]);
+                        var fieldProblem = MeetingRule.CheckMeetingFields(
                             hasAttendance: Convert.ToBoolean(current["HasAttendance"]),
-                            originalStart: Convert.ToDateTime(current["StartDateTime"]),
+                            originalStart: Convert.ToDateTime(current["StartTime"]),
                             originalEnd: originalEnd,
-                            originalHosts: [Slot(current["Host1EmployeeNo"]), Slot(current["Host2EmployeeNo"]), Slot(current["Host3EmployeeNo"])],
-                            originalAllowUnlisted: Convert.ToBoolean(current["AllowUnlistedParticipants"]),
+                            originalHosts: [Slot(current["Host1"]), Slot(current["Host2"]), Slot(current["Host3"])],
+                            originalWalkIn: Convert.ToBoolean(current["AllowWalkIn"]),
                             newStart: start,
                             newHosts: [request.Host1UserID, request.Host2UserID, request.Host3UserID],
-                            newAllowUnlisted: request.AllowUnlistedParticipants,
-                            now: AppClock.Now);
+                            newWalkIn: request.AllowWalkIn,
+                            now: TaipeiTime.Now);
                         if (fieldProblem is not null)
                             throw new InvalidOperationException(fieldProblem);
-                        meetingEnded = MeetingEditRules.HasEnded(originalEnd, AppClock.Now);
+                        meetingEnded = MeetingRule.HasEnded(originalEnd, TaipeiTime.Now);
                     }
                 }
 
@@ -282,24 +282,24 @@ internal static class MeetingEndpoints
                     const string insertSql = """
                         INSERT dbo.Meeting
                         (
-                            MeetingNo, MeetingName, MeetingSubName, StartDateTime, EndDateTime,
+                            MeetingNo, MeetingName, MeetingSubName, StartTime, EndTime,
                             LocationType, RoomID, CustomLocation,
-                            Host1EmployeeNo, Host2EmployeeNo, Host3EmployeeNo,
-                            QRCode, CreatedByEmployeeNo, CreatedTime,
-                            UpdatedByEmployeeNo, UpdatedTime, Description,
-                            AllowUnlistedParticipants, ExpectedParticipantCount
+                            Host1, Host2, Host3,
+                            QRCode, CreateUser, CreateTime,
+                            UpdateUser, UpdateTime, Description,
+                            AllowWalkIn, ExpectedCount
                         )
                         VALUES
                         (
                             @MeetingNo, @Name, @SubName, @Start, @End,
                             @LocationType, @RoomID, @CustomLocation,
                             @Host1, @Host2, @Host3,
-                            @QRCode, @User, dbo.AppNow(),
+                            @QRCode, @User, dbo.fn_Now(),
                             NULL, NULL, @Description,
-                            @AllowUnlistedParticipants, @ExpectedParticipantCount
+                            @AllowWalkIn, @ExpectedCount
                         );
                         """;
-                    var qrToken = await CreateUniqueMeetingTokenAsync(connection, tx, meetingNo!);
+                    var qrToken = await NewUniqueTokenAsync(connection, tx, meetingNo!);
                     await using var command = new SqlCommand(insertSql, connection, tx);
                     AddMeetingParameters(command, meetingNo!, request, start, end, locationType, qrToken);
                     await command.ExecuteNonQueryAsync();
@@ -310,19 +310,19 @@ internal static class MeetingEndpoints
                         UPDATE dbo.Meeting
                         SET MeetingName = @Name,
                             MeetingSubName = @SubName,
-                            StartDateTime = @Start,
-                            EndDateTime = @End,
+                            StartTime = @Start,
+                            EndTime = @End,
                             LocationType = @LocationType,
                             RoomID = @RoomID,
                             CustomLocation = @CustomLocation,
-                            Host1EmployeeNo = @Host1,
-                            Host2EmployeeNo = @Host2,
-                            Host3EmployeeNo = @Host3,
+                            Host1 = @Host1,
+                            Host2 = @Host2,
+                            Host3 = @Host3,
                             Description = @Description,
-                            AllowUnlistedParticipants = @AllowUnlistedParticipants,
-                            ExpectedParticipantCount = @ExpectedParticipantCount,
-                            UpdatedByEmployeeNo = @User,
-                            UpdatedTime = dbo.AppNow()
+                            AllowWalkIn = @AllowWalkIn,
+                            ExpectedCount = @ExpectedCount,
+                            UpdateUser = @User,
+                            UpdateTime = dbo.fn_Now()
                         WHERE MeetingNo = @MeetingNo;
                         """;
                     await using var command = new SqlCommand(updateSql, connection, tx);
@@ -352,7 +352,7 @@ internal static class MeetingEndpoints
                 }
 
                 var submittedInvited = internalPeople.ToHashSet(StringComparer.OrdinalIgnoreCase);
-                if (MeetingEditRules.CheckInvitedList(meetingEnded, existingInvited, submittedInvited) is { } listProblem)
+                if (MeetingRule.CheckInvitedList(meetingEnded, existingInvited, submittedInvited) is { } listProblem)
                     throw new InvalidOperationException(listProblem);
                 var removedInvited = existingInvited.Where(x => !submittedInvited.Contains(x)).ToList();
 
@@ -403,21 +403,21 @@ internal static class MeetingEndpoints
                     if (existingInvited.Contains(employeeNo))
                         sql = """
                             UPDATE dbo.MeetingParticipant
-                            SET UpdatedByEmployeeNo=@User, UpdatedTime=dbo.AppNow()
+                            SET UpdateUser=@User, UpdateTime=dbo.fn_Now()
                             WHERE MeetingNo=@MeetingNo AND EmployeeNo=@EmployeeNo;
                             """;
                     else if (existingWalkIns.Contains(employeeNo))
                         // 原本是現場加入的人，主持人這次把他正式加進名單：升級為受邀者，保留原本的簽到紀錄。
                         sql = """
                             UPDATE dbo.MeetingParticipant
-                            SET Source=1, UpdatedByEmployeeNo=@User, UpdatedTime=dbo.AppNow()
+                            SET Source=1, UpdateUser=@User, UpdateTime=dbo.fn_Now()
                             WHERE MeetingNo=@MeetingNo AND EmployeeNo=@EmployeeNo;
                             """;
                     else
                         sql = """
                             INSERT dbo.MeetingParticipant
-                                (MeetingNo, ParticipantType, Source, EmployeeNo, CreatedByEmployeeNo, CreatedTime)
-                            VALUES (@MeetingNo, 1, 1, @EmployeeNo, @User, dbo.AppNow());
+                                (MeetingNo, ParticipantType, Source, EmployeeNo, CreateUser, CreateTime)
+                            VALUES (@MeetingNo, 1, 1, @EmployeeNo, @User, dbo.fn_Now());
                             """;
                     await using var command = new SqlCommand(sql, connection, tx);
                     command.Parameters.Add("@MeetingNo", SqlDbType.VarChar, 20).Value = meetingNo!;
@@ -432,7 +432,7 @@ internal static class MeetingEndpoints
             catch (Exception ex) when (!IsDeadlock(ex))
             {
                 await tx.RollbackAsync();
-                return Results.Json(new { success = false, message = CleanDatabaseMessage(ex) }, statusCode: 400);
+                return Results.Json(new { success = false, message = GetErrorMessage(ex) }, statusCode: 400);
             }
         });
     }
@@ -447,7 +447,7 @@ internal static class MeetingEndpoints
         string qrCode)
     {
         // 預設人數 = 受邀院內人員（含主持人）。開放式會議不計算出席率，因此固定為 0。
-        var expectedParticipantCount = request.AllowUnlistedParticipants ? 0 : (request.ParticipantUserIDs ?? [])
+        var expectedCount = request.AllowWalkIn ? 0 : (request.ParticipantUserIDs ?? [])
             .Where(x => !string.IsNullOrWhiteSpace(x) && !x.StartsWith("EXT|", StringComparison.OrdinalIgnoreCase))
             .Select(x => x.Trim())
             .Concat(new[] { request.Host1UserID, request.Host2UserID, request.Host3UserID }
@@ -472,8 +472,8 @@ internal static class MeetingEndpoints
         command.Parameters.Add("@QRCode", SqlDbType.VarChar, 100).Value = qrCode;
         command.Parameters.Add("@User", SqlDbType.VarChar, 20).Value = request.CurrentUserID.Trim();
         command.Parameters.Add("@Description", SqlDbType.NVarChar, 1000).Value = DbValue(request.Note);
-        command.Parameters.Add("@AllowUnlistedParticipants", SqlDbType.Bit).Value = request.AllowUnlistedParticipants;
-        command.Parameters.Add("@ExpectedParticipantCount", SqlDbType.Int).Value = expectedParticipantCount;
+        command.Parameters.Add("@AllowWalkIn", SqlDbType.Bit).Value = request.AllowWalkIn;
+        command.Parameters.Add("@ExpectedCount", SqlDbType.Int).Value = expectedCount;
     }
 
     internal static async Task<IResult> GetMeetingDetail(string meetingNo, string userId, IConfiguration configuration)
@@ -484,28 +484,28 @@ internal static class MeetingEndpoints
         const string meetingSql = """
             SELECT
                 m.MeetingNo, m.MeetingName, m.MeetingSubName,
-                m.StartDateTime, m.EndDateTime,
+                m.StartTime, m.EndTime,
                 m.LocationType, m.RoomID, m.CustomLocation,
-                m.Host1EmployeeNo, m.Host2EmployeeNo, m.Host3EmployeeNo,
+                m.Host1, m.Host2, m.Host3,
                 m.QRCode, m.Description,
-                ISNULL(m.AllowUnlistedParticipants, 0) AS AllowUnlistedParticipants,
-                ISNULL(m.ExpectedParticipantCount, 0) AS ExpectedParticipantCount,
-                m.CreatedByEmployeeNo, m.CreatedTime, m.UpdatedByEmployeeNo, m.UpdatedTime,
-                ISNULL(NULLIF(LTRIM(RTRIM(u1.CNM)), N''), m.Host1EmployeeNo) AS Host1Name,
-                ISNULL(NULLIF(LTRIM(RTRIM(u2.CNM)), N''), m.Host2EmployeeNo) AS Host2Name,
-                ISNULL(NULLIF(LTRIM(RTRIM(u3.CNM)), N''), m.Host3EmployeeNo) AS Host3Name,
+                ISNULL(m.AllowWalkIn, 0) AS AllowWalkIn,
+                ISNULL(m.ExpectedCount, 0) AS ExpectedCount,
+                m.CreateUser, m.CreateTime, m.UpdateUser, m.UpdateTime,
+                ISNULL(NULLIF(LTRIM(RTRIM(u1.CNM)), N''), m.Host1) AS Host1Name,
+                ISNULL(NULLIF(LTRIM(RTRIM(u2.CNM)), N''), m.Host2) AS Host2Name,
+                ISNULL(NULLIF(LTRIM(RTRIM(u3.CNM)), N''), m.Host3) AS Host3Name,
                 CASE
-                    WHEN @User IN (m.Host1EmployeeNo, m.Host2EmployeeNo, m.Host3EmployeeNo)
-                         OR m.CreatedByEmployeeNo = @User THEN 'host'
+                    WHEN @User IN (m.Host1, m.Host2, m.Host3)
+                         OR m.CreateUser = @User THEN 'host'
                     ELSE 'participant'
                 END AS Relation,
                 (SELECT COUNT(*) FROM dbo.MeetingParticipant p WHERE p.MeetingNo = m.MeetingNo) AS ParticipantCount,
                 m.RowVer,
                 CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.MeetingParticipant hp JOIN dbo.MeetingAttendance ha ON ha.ParticipantID = hp.ParticipantID WHERE hp.MeetingNo = m.MeetingNo) THEN 1 ELSE 0 END AS BIT) AS HasAttendance
             FROM dbo.Meeting m
-            LEFT JOIN LineDB.dbo.UserInfo u1 ON u1.SNTOPID = m.Host1EmployeeNo
-            LEFT JOIN LineDB.dbo.UserInfo u2 ON u2.SNTOPID = m.Host2EmployeeNo
-            LEFT JOIN LineDB.dbo.UserInfo u3 ON u3.SNTOPID = m.Host3EmployeeNo
+            LEFT JOIN LineDB.dbo.UserInfo u1 ON u1.SNTOPID = m.Host1
+            LEFT JOIN LineDB.dbo.UserInfo u2 ON u2.SNTOPID = m.Host2
+            LEFT JOIN LineDB.dbo.UserInfo u3 ON u3.SNTOPID = m.Host3
             WHERE m.MeetingNo = @MeetingNo
               AND ISNULL(m.IsDeleted, 0) = 0;
             """;
@@ -519,8 +519,8 @@ internal static class MeetingEndpoints
             if (!await reader.ReadAsync())
                 return Results.NotFound(new { success = false, message = "找不到會議。" });
 
-            var start = Convert.ToDateTime(reader["StartDateTime"]);
-            var end = Convert.ToDateTime(reader["EndDateTime"]);
+            var start = Convert.ToDateTime(reader["StartTime"]);
+            var end = Convert.ToDateTime(reader["EndTime"]);
             var locationType = Convert.ToInt32(reader["LocationType"]);
             var roomId = reader["RoomID"] is DBNull ? "" : reader["RoomID"].ToString();
             var customLocation = reader["CustomLocation"] is DBNull ? "" : reader["CustomLocation"].ToString();
@@ -545,26 +545,26 @@ internal static class MeetingEndpoints
                 roomId,
                 customLocation,
                 hostNames,
-                host1UserID = reader["Host1EmployeeNo"] is DBNull ? "" : reader["Host1EmployeeNo"].ToString(),
-                host2UserID = reader["Host2EmployeeNo"] is DBNull ? "" : reader["Host2EmployeeNo"].ToString(),
-                host3UserID = reader["Host3EmployeeNo"] is DBNull ? "" : reader["Host3EmployeeNo"].ToString(),
+                host1UserID = reader["Host1"] is DBNull ? "" : reader["Host1"].ToString(),
+                host2UserID = reader["Host2"] is DBNull ? "" : reader["Host2"].ToString(),
+                host3UserID = reader["Host3"] is DBNull ? "" : reader["Host3"].ToString(),
                 relation = reader["Relation"].ToString(),
                 qrCode = reader["QRCode"] is DBNull ? "" : reader["QRCode"].ToString(),
-                checkInOpenAt = start.AddMinutes(-CheckInRules.OpenMinutesBeforeStart).ToString("yyyy-MM-ddTHH:mm:ss"),
+                checkInOpenAt = start.AddMinutes(-SignInRule.OpenMinutesBeforeStart).ToString("yyyy-MM-ddTHH:mm:ss"),
                 startDateTime = start.ToString("yyyy-MM-ddTHH:mm:ss"),
                 endDateTime = end.ToString("yyyy-MM-ddTHH:mm:ss"),
                 note = reader["Description"] is DBNull ? "" : reader["Description"].ToString(),
-                allowUnlistedParticipants = Convert.ToBoolean(reader["AllowUnlistedParticipants"]),
-                expectedParticipantCount = Convert.ToInt32(reader["ExpectedParticipantCount"]),
+                allowWalkIn = Convert.ToBoolean(reader["AllowWalkIn"]),
+                expectedCount = Convert.ToInt32(reader["ExpectedCount"]),
                 participantCount = Convert.ToInt32(reader["ParticipantCount"]),
-                lastSavedAt = reader["UpdatedTime"] is DBNull ? reader["CreatedTime"] : reader["UpdatedTime"],
+                lastSavedAt = reader["UpdateTime"] is DBNull ? reader["CreateTime"] : reader["UpdateTime"],
                 rowVersion = Convert.ToBase64String((byte[])reader["RowVer"]),
                 hasAttendance = Convert.ToBoolean(reader["HasAttendance"]),
-                isCreator = string.Equals(reader["CreatedByEmployeeNo"].ToString()?.Trim(), userId.Trim(), StringComparison.OrdinalIgnoreCase)
+                isCreator = string.Equals(reader["CreateUser"].ToString()?.Trim(), userId.Trim(), StringComparison.OrdinalIgnoreCase)
             };
             await reader.CloseAsync();
 
-            var locationDisplay = await ResolveLocationDisplay(connection, detailData.locationType, detailData.roomId, detailData.customLocation);
+            var locationDisplay = await GetLocationName(connection, detailData.locationType, detailData.roomId, detailData.customLocation);
             meeting = new
             {
                 detailData.id,
@@ -587,14 +587,14 @@ internal static class MeetingEndpoints
                 detailData.startDateTime,
                 detailData.endDateTime,
                 detailData.note,
-                detailData.allowUnlistedParticipants,
-                detailData.expectedParticipantCount,
+                detailData.allowWalkIn,
+                detailData.expectedCount,
                 detailData.participantCount,
                 detailData.lastSavedAt,
                 detailData.rowVersion,
                 detailData.hasAttendance,
                 detailData.isCreator,
-                canDelete = MeetingEditRules.CanDelete(detailData.isCreator, detailData.hasAttendance)
+                canDelete = MeetingRule.CanDelete(detailData.isCreator, detailData.hasAttendance)
             };
         }
 
@@ -602,14 +602,14 @@ internal static class MeetingEndpoints
         const string participantSql = """
             SELECT
                 p.ParticipantID, p.ParticipantType, p.Source,
-                p.EmployeeNo, p.ExternalName, p.ExternalOrganization, p.ExternalTitle,
-                CASE WHEN p.ParticipantType = 1 THEN ISNULL(NULLIF(LTRIM(RTRIM(u.CNM)), N''), p.EmployeeNo) ELSE p.ExternalName END AS Name,
-                CASE WHEN p.ParticipantType = 1 THEN ISNULL(LTRIM(RTRIM(u.DPCNM)), N'') ELSE p.ExternalOrganization END AS Organization,
+                p.EmployeeNo, p.GuestName, p.GuestOrg, p.GuestTitle,
+                CASE WHEN p.ParticipantType = 1 THEN ISNULL(NULLIF(LTRIM(RTRIM(u.CNM)), N''), p.EmployeeNo) ELSE p.GuestName END AS Name,
+                CASE WHEN p.ParticipantType = 1 THEN ISNULL(LTRIM(RTRIM(u.DPCNM)), N'') ELSE p.GuestOrg END AS Organization,
                 CASE WHEN p.ParticipantType = 1 THEN ISNULL(LTRIM(RTRIM(u.DPID)), N'') ELSE N'' END AS DepartmentID,
-                CASE WHEN p.ParticipantType = 1 THEN ISNULL(LTRIM(RTRIM(u.DUTNM)), N'') ELSE ISNULL(p.ExternalTitle, N'') END AS Title,
+                CASE WHEN p.ParticipantType = 1 THEN ISNULL(LTRIM(RTRIM(u.DUTNM)), N'') ELSE ISNULL(p.GuestTitle, N'') END AS Title,
                 a.SignInTime,
                 a.SignOutTime,
-                a.ProxySignEmployeeNo
+                a.ProxyUser
             FROM dbo.MeetingParticipant p
             LEFT JOIN LineDB.dbo.UserInfo u ON u.SNTOPID = p.EmployeeNo
             LEFT JOIN dbo.MeetingAttendance a ON a.ParticipantID = p.ParticipantID
@@ -626,7 +626,7 @@ internal static class MeetingEndpoints
                 var isInternal = participantType == 1;
                 participants.Add(new
                 {
-                    userID = ParticipantRowId(participantType, reader["EmployeeNo"], Convert.ToInt32(reader["ParticipantID"])),
+                    userID = GetRowKey(participantType, reader["EmployeeNo"], Convert.ToInt32(reader["ParticipantID"])),
                     employeeId = isInternal ? reader["EmployeeNo"].ToString() : null,
                     sntopid = isInternal ? reader["EmployeeNo"].ToString() : null,
                     name = reader["Name"].ToString(),
@@ -638,11 +638,11 @@ internal static class MeetingEndpoints
                     title = reader["Title"].ToString(),
                     participantType = isInternal ? "Internal" : "External",
                     source = SourceName(Convert.ToInt32(reader["Source"])),
-                    externalName = isInternal ? null : reader["ExternalName"].ToString(),
-                    externalOrganization = isInternal ? null : reader["ExternalOrganization"].ToString(),
+                    guestName = isInternal ? null : reader["GuestName"].ToString(),
+                    guestOrg = isInternal ? null : reader["GuestOrg"].ToString(),
                     signInTime = reader["SignInTime"] is DBNull ? "" : Convert.ToDateTime(reader["SignInTime"]).ToString("yyyy-MM-dd HH:mm"),
                     signOutTime = reader["SignOutTime"] is DBNull ? "" : Convert.ToDateTime(reader["SignOutTime"]).ToString("yyyy-MM-dd HH:mm"),
-                    proxyEmployeeNo = reader["ProxySignEmployeeNo"] is DBNull ? "" : reader["ProxySignEmployeeNo"].ToString()
+                    proxyEmployeeNo = reader["ProxyUser"] is DBNull ? "" : reader["ProxyUser"].ToString()
                 });
             }
         }
@@ -652,8 +652,8 @@ internal static class MeetingEndpoints
 
     internal static object MapMeeting(SqlDataReader reader, bool detail = false)
     {
-        var start = Convert.ToDateTime(reader["StartDateTime"]);
-        var end = Convert.ToDateTime(reader["EndDateTime"]);
+        var start = Convert.ToDateTime(reader["StartTime"]);
+        var end = Convert.ToDateTime(reader["EndTime"]);
         var locationType = Convert.ToInt32(reader["LocationType"]);
         var custom = reader["CustomLocation"] is DBNull ? "" : reader["CustomLocation"].ToString() ?? "";
         var room = reader["RoomID"] is DBNull ? "" : reader["RoomID"].ToString() ?? "";
@@ -687,22 +687,22 @@ internal static class MeetingEndpoints
                 reader["Host2Name"] is DBNull ? "" : reader["Host2Name"].ToString()?.Trim() ?? "",
                 reader["Host3Name"] is DBNull ? "" : reader["Host3Name"].ToString()?.Trim() ?? ""
             }.Where(x => !string.IsNullOrWhiteSpace(x))),
-            host1UserID = reader["Host1EmployeeNo"] is DBNull ? "" : reader["Host1EmployeeNo"].ToString(),
-            host2UserID = reader["Host2EmployeeNo"] is DBNull ? "" : reader["Host2EmployeeNo"].ToString(),
-            host3UserID = reader["Host3EmployeeNo"] is DBNull ? "" : reader["Host3EmployeeNo"].ToString(),
+            host1UserID = reader["Host1"] is DBNull ? "" : reader["Host1"].ToString(),
+            host2UserID = reader["Host2"] is DBNull ? "" : reader["Host2"].ToString(),
+            host3UserID = reader["Host3"] is DBNull ? "" : reader["Host3"].ToString(),
             relation = reader["Relation"].ToString(),
-            checkInOpenAt = start.AddMinutes(-CheckInRules.OpenMinutesBeforeStart).ToString("yyyy-MM-ddTHH:mm:ss"),
+            checkInOpenAt = start.AddMinutes(-SignInRule.OpenMinutesBeforeStart).ToString("yyyy-MM-ddTHH:mm:ss"),
             startDateTime = start.ToString("yyyy-MM-ddTHH:mm:ss"),
             endDateTime = end.ToString("yyyy-MM-ddTHH:mm:ss"),
             qrCode = reader["QRCode"] is DBNull ? "" : reader["QRCode"].ToString(),
             note = reader["Description"] is DBNull ? "" : reader["Description"].ToString(),
-            allowUnlistedParticipants = Convert.ToBoolean(reader["AllowUnlistedParticipants"]),
-            expectedParticipantCount = Convert.ToInt32(reader["ExpectedParticipantCount"]),
+            allowWalkIn = Convert.ToBoolean(reader["AllowWalkIn"]),
+            expectedCount = Convert.ToInt32(reader["ExpectedCount"]),
             participantCount = Convert.ToInt32(reader["ParticipantCount"]),
-            lastSavedAt = reader["UpdatedTime"] is DBNull ? reader["CreatedTime"] : reader["UpdatedTime"],
+            lastSavedAt = reader["UpdateTime"] is DBNull ? reader["CreateTime"] : reader["UpdateTime"],
             // 只有建立者、且尚無人簽到時才能刪除（清單 API 才有這兩欄）。
             canDelete = HasColumn(reader, "IsCreator")
-                        && MeetingEditRules.CanDelete(Convert.ToBoolean(reader["IsCreator"]), Convert.ToBoolean(reader["HasAttendance"]))
+                        && MeetingRule.CanDelete(Convert.ToBoolean(reader["IsCreator"]), Convert.ToBoolean(reader["HasAttendance"]))
         };
     }
 

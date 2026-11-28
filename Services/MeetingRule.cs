@@ -2,7 +2,7 @@ namespace MeetingCheckin;
 
 // 修改、刪除會議的限制。SaveMeeting 與刪除 API 從資料庫讀出現況後交給這裡判斷，
 // 規則集中在一處，也方便單元測試。違反規則時回傳錯誤訊息，沒問題回傳 null。
-public static class MeetingEditRules
+public static class MeetingRule
 {
     // 編輯頁送回開啟當下的版本（rowversion）。不同代表期間有人存過，避免後存的人覆蓋前一個人。
     public static string? CheckVersion(string? submittedVersion, string currentVersion)
@@ -24,10 +24,10 @@ public static class MeetingEditRules
         DateTime originalStart,
         DateTime originalEnd,
         IReadOnlyList<string?> originalHosts,
-        bool originalAllowUnlisted,
+        bool originalWalkIn,
         DateTime newStart,
         IReadOnlyList<string?> newHosts,
-        bool newAllowUnlisted,
+        bool newWalkIn,
         DateTime now)
     {
         if (hasAttendance && newStart.Date != originalStart.Date)
@@ -39,7 +39,7 @@ public static class MeetingEditRules
         static string Norm(string? value) => value?.Trim() ?? "";
         if (!originalHosts.Select(Norm).SequenceEqual(newHosts.Select(Norm), StringComparer.OrdinalIgnoreCase))
             return "會議已結束，不能修改主持人。";
-        if (originalAllowUnlisted != newAllowUnlisted)
+        if (originalWalkIn != newWalkIn)
             return "會議已結束，不能修改是否開放非名單人員加入。";
         return null;
     }

@@ -12,7 +12,7 @@ public static class LoginThrottle
     public static bool IsLocked(string account)
     {
         if (!Failures.TryGetValue(account, out var entry)) return false;
-        if (AppClock.UtcNow() - entry.FirstFailure > Window)
+        if (TaipeiTime.UtcNow() - entry.FirstFailure > Window)
         {
             Failures.TryRemove(account, out _);
             return false;
@@ -22,7 +22,7 @@ public static class LoginThrottle
 
     public static void RecordFailure(string account)
     {
-        var now = AppClock.UtcNow();
+        var now = TaipeiTime.UtcNow();
         Failures.AddOrUpdate(account,
             _ => (1, now),
             (_, entry) => now - entry.FirstFailure > Window ? (1, now) : (entry.Count + 1, entry.FirstFailure));

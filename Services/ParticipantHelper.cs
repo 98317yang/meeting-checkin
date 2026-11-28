@@ -1,6 +1,6 @@
 namespace MeetingCheckin;
 
-internal static class Participants
+internal static class ParticipantHelper
 {
     internal static DateTime CombineDateTime(string date, string time)
     {
@@ -14,7 +14,7 @@ internal static class Participants
 
     // 名單列在前端的識別值。院內人員用員工編號；訪客沒有可公開的穩定代號，用 ParticipantID。
     // 以前訪客是用「姓名|單位」當識別值，名字一改紀錄就對不上，這裡改用不會變的主鍵。
-    internal static string ParticipantRowId(int participantType, object employeeNo, int participantId) =>
+    internal static string GetRowKey(int participantType, object employeeNo, int participantId) =>
         participantType == 1 ? Convert.ToString(employeeNo)?.Trim() ?? "" : $"EXT|{participantId}";
 
     internal static string SourceName(int source) => source switch
@@ -25,7 +25,7 @@ internal static class Participants
     };
 
     // 把前端送回的名單列識別值換回 ParticipantID，並確認這個人屬於指定的會議。
-    internal static async Task<int?> FindParticipantByRowId(SqlConnection connection, SqlTransaction tx, string meetingNo, string? rowId)
+    internal static async Task<int?> FindParticipantId(SqlConnection connection, SqlTransaction tx, string meetingNo, string? rowId)
     {
         rowId = rowId?.Trim() ?? "";
         if (rowId.Length == 0) return null;
@@ -64,7 +64,7 @@ internal static class Participants
         SqlConnection connection, string meetingNo, string guestKey)
     {
         await using var command = new SqlCommand("""
-            SELECT ExternalName, ExternalOrganization, ExternalTitle
+            SELECT GuestName, GuestOrg, GuestTitle
             FROM dbo.MeetingParticipant
             WHERE MeetingNo = @MeetingNo AND GuestKey = @GuestKey;
             """, connection);
@@ -73,9 +73,9 @@ internal static class Participants
         await using var reader = await command.ExecuteReaderAsync();
         if (!await reader.ReadAsync()) return null;
         return (
-            reader["ExternalName"].ToString() ?? "",
-            reader["ExternalOrganization"].ToString() ?? "",
-            reader["ExternalTitle"] is DBNull ? "" : reader["ExternalTitle"].ToString() ?? "");
+            reader["GuestName"].ToString() ?? "",
+            reader["GuestOrg"].ToString() ?? "",
+            reader["GuestTitle"] is DBNull ? "" : reader["GuestTitle"].ToString() ?? "");
     }
 
 }

@@ -6,7 +6,7 @@ internal static class SystemEndpoints
     {
         app.MapGet("/api/client-device", async (HttpContext context, IWebHostEnvironment environment) =>
         {
-            var result = await DetectHospitalComputerAsync(context, environment);
+            var result = await CheckHospitalPcAsync(context, environment);
 
             return Results.Ok(new
             {

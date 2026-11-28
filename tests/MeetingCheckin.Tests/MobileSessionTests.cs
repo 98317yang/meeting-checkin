@@ -7,18 +7,18 @@ public class MobileSessionTests
 {
     private static readonly IDataProtectionProvider Protection = new EphemeralDataProtectionProvider();
 
-    private static bool Read(string? header, out MobileMeetingSessionPayload? payload)
+    private static bool Read(string? header, out MobileSessionData? payload)
     {
         var context = new DefaultHttpContext();
         if (header is not null) context.Request.Headers["X-Meeting-Session"] = header;
-        return MobileSession.TryReadMobileMeetingSession(context.Request, Protection, out payload);
+        return MobileSession.TryReadMobileSession(context.Request, Protection, out payload);
     }
 
     [Fact]
     public void IssuedSession_CanBeReadBack()
     {
-        var end = AppClock.Now.AddHours(1);
-        var session = MobileSession.CreateMobileMeetingSession(Protection, 1, "10001", "2026110001", "M-token", end);
+        var end = TaipeiTime.Now.AddHours(1);
+        var session = MobileSession.CreateMobileSession(Protection, 1, "10001", "2026110001", "M-token", end);
 
         Assert.True(Read(session, out var payload));
         Assert.Equal("10001", payload!.EmployeeNo);
@@ -29,7 +29,7 @@ public class MobileSessionTests
     [Fact]
     public void TamperedOrMissingSession_IsRejected()
     {
-        var session = MobileSession.CreateMobileMeetingSession(Protection, 1, "10001", "2026110001", "M-token", AppClock.Now.AddHours(1));
+        var session = MobileSession.CreateMobileSession(Protection, 1, "10001", "2026110001", "M-token", TaipeiTime.Now.AddHours(1));
         Assert.False(Read(session[..^2] + "xx", out _));
         Assert.False(Read(null, out _));
     }
@@ -37,8 +37,8 @@ public class MobileSessionTests
     [Fact]
     public void SessionFromLongEndedMeeting_IsRejected()
     {
-        var longAgo = AppClock.Now.AddDays(-30);
-        var session = MobileSession.CreateMobileMeetingSession(Protection, 1, "10001", "2026110001", "M-token", longAgo);
+        var longAgo = TaipeiTime.Now.AddDays(-30);
+        var session = MobileSession.CreateMobileSession(Protection, 1, "10001", "2026110001", "M-token", longAgo);
         Assert.False(Read(session, out _));
     }
 }

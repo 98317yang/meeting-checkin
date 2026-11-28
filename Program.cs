@@ -41,9 +41,9 @@ builder.Services.AddAuthorization(options =>
 var app = builder.Build();
 
 // 開始前幾分鐘開放簽到（CheckIn:OpenMinutesBeforeStart，0 表示開始時間才開放）。
-CheckInRules.OpenMinutesBeforeStart = Math.Clamp(app.Configuration.GetValue("CheckIn:OpenMinutesBeforeStart", 0), 0, 240);
+SignInRule.OpenMinutesBeforeStart = Math.Clamp(app.Configuration.GetValue("CheckIn:OpenMinutesBeforeStart", 0), 0, 240);
 // 會議結束後幾分鐘內仍可掃碼進入與簽退（CheckIn:CloseMinutesAfterEnd，預設 30）。結束後不能再簽到。
-CheckInRules.CloseMinutesAfterEnd = Math.Clamp(app.Configuration.GetValue("CheckIn:CloseMinutesAfterEnd", 30), 0, 240);
+SignInRule.CloseMinutesAfterEnd = Math.Clamp(app.Configuration.GetValue("CheckIn:CloseMinutesAfterEnd", 30), 0, 240);
 
 app.UseResponseCompression();
 
@@ -51,7 +51,7 @@ app.UseResponseCompression();
 // 經過 ngrok 等反向代理轉發的請求，連線來源同樣是本機，因此不能只看 IP，要另外檢查轉發標頭與 Host。
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments("/api/dev") && !IsDirectLocalRequest(context))
+    if (context.Request.Path.StartsWithSegments("/api/dev") && !IsLocalRequest(context))
     {
         context.Response.StatusCode = StatusCodes.Status404NotFound;
         return;
@@ -64,13 +64,13 @@ app.Use(async (context, next) =>
     var path = context.Request.Path;
 
     // LINE / LIFF 行動流程在外網可使用。
-    if (IsExternalAllowedPath(path))
+    if (IsPublicPath(path))
     {
         await next();
         return;
     }
 
-    var device = await DetectHospitalComputerAsync(context, app.Environment);
+    var device = await CheckHospitalPcAsync(context, app.Environment);
 
     if (device.IsHospitalComputer)
     {

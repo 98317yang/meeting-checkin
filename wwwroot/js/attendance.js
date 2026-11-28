@@ -4,7 +4,7 @@ const meetingId = attendanceParams.get('id');
 const returnSource = (attendanceParams.get('from') || '').trim().toLowerCase();
 // originals：載入時每一列的原始值。存檔時只送出有改過的列，並附上原始值，
 // 讓後端確認這段期間沒有人改過（例如本人用手機簽到），避免用過期的畫面蓋掉新紀錄。
-const rowSnapshot = (r) => ({
+const snapshot = (r) => ({
   in: r.in || '',
   out: r.out || '',
   operator: r.proxyEmployeeNo || '',
@@ -49,14 +49,14 @@ async function getUsers(departmentId) {
   if (!usersByDepartment.has(departmentId))
     usersByDepartment.set(
       departmentId,
-      apiJsonCached(`api/users?departmentId=${encodeURIComponent(departmentId)}`, {}, 300000),
+      cachedApi(`api/users?departmentId=${encodeURIComponent(departmentId)}`, {}, 300000),
     );
   return await usersByDepartment.get(departmentId);
 }
 // 標記為出席（選「出席」或指定代簽人）但還沒有簽到時間時，以現在時間作為簽到時間。
 // 沒有簽到時間的出席紀錄存不進資料庫，不能只在畫面上顯示出席。
 // 未出席原因只給沒來的人填；一標記出席就清空並鎖住（後端也會清掉）。
-function lockAbsenceReason(tr, row, locked) {
+function lockReason(tr, row, locked) {
   row.note = locked ? '' : row.note;
   const input = tr.querySelector('input[data-k="note"]');
   if (input) {
@@ -64,15 +64,15 @@ function lockAbsenceReason(tr, row, locked) {
     if (locked) input.value = '';
   }
 }
-function fillSignInIfMissing(tr, row) {
-  lockAbsenceReason(tr, row, true);
+function fillSignIn(tr, row) {
+  lockReason(tr, row, true);
   if (row.in) return;
   const now = new Date();
   row.in = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   tr.querySelector('input[data-time-kind="in"]').value = row.in;
   tr.querySelector('[data-print-kind="in"]').textContent = row.in;
 }
-async function proxyUserOptions(row, departmentId) {
+async function proxyOptions(row, departmentId) {
   const users = await getUsers(departmentId);
   return `<option value="">不指定</option>${users.map((u) => `<option value="${esc(u.userID)}"${u.userID === row.proxyEmployeeNo ? ' selected' : ''}>${esc(fullName(u.name, u.employeeId))}</option>`).join('')}`;
 }
@@ -95,7 +95,7 @@ function resetAttendanceRow(tr, row) {
   row.proxyName = '';
   row.proxyDepartment = '';
   row.note = '';
-  lockAbsenceReason(tr, row, false);
+  lockReason(tr, row, false);
   const reason = tr.querySelector('input[data-k="note"]');
   if (reason) reason.placeholder = '未出席原因';
   for (const kind of ['in', 'out']) {
@@ -153,7 +153,7 @@ async function render() {
     if (!item.selectedDept) continue;
     const deptSelect = item.tr.querySelector('[data-proxy-department]');
     deptSelect.value = item.selectedDept.departmentID;
-    item.tr.querySelector('[data-proxy-user]').innerHTML = await proxyUserOptions(
+    item.tr.querySelector('[data-proxy-user]').innerHTML = await proxyOptions(
       item.row,
       item.selectedDept.departmentID,
     );
@@ -179,7 +179,7 @@ async function render() {
           row.attendanceStatus = '出席';
           tr.querySelector('[data-status]').value = '出席';
           tr.querySelector('[data-print-status]').textContent = '出席';
-          lockAbsenceReason(tr, row, true);
+          lockReason(tr, row, true);
         }
       } else if (!value) {
         row[kind] = '';
@@ -200,7 +200,7 @@ async function render() {
       if (el.value === '未出席') {
         resetAttendanceRow(tr, row);
       } else {
-        fillSignInIfMissing(tr, row);
+        fillSignIn(tr, row);
       }
       dirty = true;
       updateStats();
@@ -215,7 +215,7 @@ async function render() {
       row.proxyDepartment = dept?.departmentName || '';
       row.proxyEmployeeNo = '';
       row.proxyName = '';
-      tr.querySelector('[data-proxy-user]').innerHTML = await proxyUserOptions(row, el.value);
+      tr.querySelector('[data-proxy-user]').innerHTML = await proxyOptions(row, el.value);
       tr.querySelector('[data-print-proxy-department]').textContent = row.proxyDepartment;
       tr.querySelector('[data-print-proxy-user]').textContent = '';
       dirty = true;
@@ -239,7 +239,7 @@ async function render() {
         row.attendanceStatus = '出席';
         tr.querySelector('[data-status]').value = '出席';
         tr.querySelector('[data-print-status]').textContent = '出席';
-        fillSignInIfMissing(tr, row);
+        fillSignIn(tr, row);
       }
       dirty = true;
       updateStats();
@@ -258,9 +258,7 @@ async function load({ silent = false } = {}) {
   try {
     const [result, depts] = await Promise.all([
       apiJson(`api/meetings/${encodeURIComponent(meetingId)}/attendance`),
-      departments.length
-        ? Promise.resolve(departments)
-        : apiJsonCached('api/departments', {}, 300000),
+      departments.length ? Promise.resolve(departments) : cachedApi('api/departments', {}, 300000),
     ]);
     if (!result || typeof result !== 'object' || !result.meeting) {
       throw new Error(
@@ -269,7 +267,7 @@ async function load({ silent = false } = {}) {
     }
     meeting = result.meeting;
     rows = result.rows || [];
-    originals = new Map(rows.map((r) => [r.userID, rowSnapshot(r)]));
+    originals = new Map(rows.map((r) => [r.userID, snapshot(r)]));
     departments = depts || [];
     title.textContent = meeting.name;
     subTitle.textContent = reportSubtitle(meeting);
@@ -296,7 +294,7 @@ save.addEventListener('click', async () => {
   const empty = { in: '', out: '', operator: '', note: '' };
   const changed = rows.filter((r) => {
     const o = originals.get(r.userID) || empty,
-      c = rowSnapshot(r);
+      c = snapshot(r);
     return c.in !== o.in || c.out !== o.out || c.operator !== o.operator || c.note !== o.note;
   });
   if (!changed.length) {

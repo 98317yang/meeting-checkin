@@ -142,10 +142,10 @@ erDiagram
     Meeting {
         string MeetingNo PK "會議編號"
         string RoomID FK
-        datetime StartDateTime
-        datetime EndDateTime
+        datetime StartTime
+        datetime EndTime
         string QRCode UK
-        bit AllowUnlistedParticipants "是否開放加入"
+        bit AllowWalkIn "是否開放加入"
         rowversion RowVer "防止同時編輯互相覆蓋"
     }
     MeetingParticipant {
@@ -160,14 +160,14 @@ erDiagram
         int ParticipantID PK, FK
         datetime SignInTime
         datetime SignOutTime
-        string ProxySignEmployeeNo "代簽人"
+        string ProxyUser "代簽人"
     }
     MeetingAttendanceLog {
         bigint LogID PK
         int ParticipantID
         char Action "新增／修改／刪除"
-        string ChangedByEmployeeNo "操作者"
-        string ChangeSource "簽到單／手機／代簽"
+        string ModifyUser "操作者"
+        string Source "簽到單／手機／代簽"
     }
 ```
 
@@ -249,15 +249,16 @@ docker exec meeting-checkin-db /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U 
 │   ├── QrEndpoints.cs         #   QR Code 圖片與重新產生
 │   ├── DirectoryEndpoints.cs  #   單位、人員、會議室查詢
 │   └── SystemEndpoints.cs     #   健康檢查、院內電腦判斷
-├── Domain/                    # 業務規則（不碰資料庫，可單元測試）
-│   ├── CheckInRules.cs        #   簽到／簽退時間窗
-│   ├── MeetingEditRules.cs    #   修改與刪除會議的限制、版本檢查
+├── Services/                  # 業務規則與共用邏輯
+│   ├── SignInRule.cs          #   簽到／簽退時間窗
+│   ├── MeetingRule.cs         #   修改與刪除會議的限制、版本檢查
 │   ├── LoginThrottle.cs       #   登入失敗次數限制
-│   ├── MeetingTokens.cs       #   QR Token、訪客代號
-│   └── Participants.cs        #   名單列識別值、時間解析
-├── Mobile/MobileSession.cs    # 手機簽到憑證的簽發與檢查
-├── Infrastructure/            # 資料庫輔助、死結重試、台北時間、請求來源判斷
-├── Contracts/Requests.cs      # API 請求格式
+│   ├── QrToken.cs             #   QR Token、訪客代號
+│   ├── ParticipantHelper.cs   #   名單列識別值、時間解析
+│   └── MobileSession.cs       #   手機簽到憑證的簽發與檢查
+├── Data/Db.cs                 # 資料庫連線、稽核紀錄、死結重試
+├── Helpers/                   # 台北時間、請求來源判斷
+├── Models/Requests.cs         # API 請求格式
 ├── tests/
 │   ├── MeetingCheckin.Tests             # 單元測試（業務規則）
 │   └── MeetingCheckin.IntegrationTests  # 整合測試（整個系統＋SQL Server）

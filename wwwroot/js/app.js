@@ -16,7 +16,7 @@ function getUser() {
   }
 }
 
-const DESKTOP_PROTECTED_PAGES = new Set([
+const LOGIN_PAGES = new Set([
   'dashboard.html',
   'sign-in.html',
   'my-meetings.html',
@@ -28,8 +28,8 @@ const DESKTOP_PROTECTED_PAGES = new Set([
 function currentPageName() {
   return (location.pathname.split('/').pop() || '').toLowerCase();
 }
-function enforceDesktopLogin() {
-  if (!DESKTOP_PROTECTED_PAGES.has(currentPageName())) return true;
+function requireLogin() {
+  if (!LOGIN_PAGES.has(currentPageName())) return true;
   if (sessionStorage.getItem('meetingLoginUser')) return true;
   location.replace('./');
   return false;
@@ -55,11 +55,11 @@ async function logoutDesktop() {
   clearDesktopSession();
   location.replace('./');
 }
-enforceDesktopLogin();
-window.addEventListener('pageshow', () => enforceDesktopLogin());
-window.addEventListener('focus', () => enforceDesktopLogin());
+requireLogin();
+window.addEventListener('pageshow', () => requireLogin());
+window.addEventListener('focus', () => requireLogin());
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) enforceDesktopLogin();
+  if (!document.hidden) requireLogin();
 });
 
 function qs(s) {
@@ -84,22 +84,22 @@ function setPageBusy(isBusy, message = '資料載入中…') {
   }
 }
 
-const pageDataCache = new Map();
-const pageRequestCache = new Map();
-async function apiJsonCached(url, options = {}, ttlMs = 30000) {
+const pageCache = new Map();
+const pendingRequests = new Map();
+async function cachedApi(url, options = {}, ttlMs = 30000) {
   const method = (options.method || 'GET').toUpperCase();
   if (method !== 'GET') return apiJson(url, options);
   const now = Date.now();
-  const hit = pageDataCache.get(url);
+  const hit = pageCache.get(url);
   if (hit && now - hit.time < ttlMs) return hit.data;
-  if (pageRequestCache.has(url)) return pageRequestCache.get(url);
+  if (pendingRequests.has(url)) return pendingRequests.get(url);
   const request = apiJson(url, options)
     .then((data) => {
-      pageDataCache.set(url, { time: Date.now(), data });
+      pageCache.set(url, { time: Date.now(), data });
       return data;
     })
-    .finally(() => pageRequestCache.delete(url));
-  pageRequestCache.set(url, request);
+    .finally(() => pendingRequests.delete(url));
+  pendingRequests.set(url, request);
   return request;
 }
 function esc(s = '') {
@@ -119,15 +119,15 @@ function meetingWindow(m) {
   const openAt = new Date(m?.checkInOpenAt || start);
   return { start, end, openAt };
 }
-function meetingAccessState(m, now = new Date()) {
+function getAccess(m, now = new Date()) {
   const { end, openAt } = meetingWindow(m);
   if (now < openAt) return 'pending';
   if (now > end) return 'closed';
   return 'open';
 }
 // 相容舊頁面名稱，避免瀏覽器快取舊 HTML 時發生 effectiveStatus 未定義。
-window.meetingAccessState = meetingAccessState;
-window.effectiveStatus = meetingAccessState;
+window.getAccess = getAccess;
+window.effectiveStatus = getAccess;
 function formatDateTimeHM(value) {
   const d = new Date(value);
   return Number.isNaN(d.getTime())
@@ -172,7 +172,7 @@ async function refreshLoginUser() {
     ).trim();
     if (!departmentName && departmentId) {
       try {
-        const departments = await apiJsonCached('api/departments', {}, 300000);
+        const departments = await cachedApi('api/departments', {}, 300000);
         departmentName = (
           departments.find(
             (x) =>
@@ -214,7 +214,7 @@ function initShell() {
   }
   refreshLoginUser();
 }
-function ensureSystemDialog() {
+function getDialog() {
   let root = qs('#systemDialog');
   if (root) return root;
   root = document.createElement('div');
@@ -233,7 +233,7 @@ function ensureSystemDialog() {
 }
 function showDialog(message, { type = 'warning', confirmText = '確定' } = {}) {
   return new Promise((resolve) => {
-    const root = ensureSystemDialog(),
+    const root = getDialog(),
       icon = qs('#systemDialogIcon'),
       msg = qs('#systemDialogMessage'),
       cancel = qs('#systemDialogCancel'),
@@ -262,7 +262,7 @@ function showConfirm(
   { type = 'warning', confirmText = '確定', cancelText = '取消' } = {},
 ) {
   return new Promise((resolve) => {
-    const root = ensureSystemDialog(),
+    const root = getDialog(),
       icon = qs('#systemDialogIcon'),
       msg = qs('#systemDialogMessage'),
       cancel = qs('#systemDialogCancel'),
@@ -320,7 +320,7 @@ function meetingCard(m, mode = 'sign') {
       : `meeting-detail.html?id=${encodeURIComponent(m.id)}&from=today`;
   const buttonText = isMine ? '查看會議' : canViewQr ? '查看 QR Code' : '查看會議資訊';
   const relationText = m.relation === 'host' ? '我發起的' : '我受邀的';
-  const state = meetingAccessState(m);
+  const state = getAccess(m);
   const stateTag = isMine
     ? `<span class="tag ${state}">${{ open: '進行中', pending: '尚未開始', closed: '已結束' }[state]}</span>`
     : '';
@@ -419,7 +419,7 @@ function xlsxCell(ref, value, style = 0) {
 function attendanceSummary(m, rows) {
   // 有簽到時間才算出席；資料庫不允許沒有簽到時間的出席紀錄。
   const present = (r) => !!r.in;
-  if (m?.allowUnlistedParticipants) return { open: true, attended: rows.filter(present).length };
+  if (m?.allowWalkIn) return { open: true, attended: rows.filter(present).length };
   // 出席率的分母只算受邀者；現場加入的院內人員與訪客都不計入。
   const listed = rows.filter((r) =>
     r.source ? r.source === 'Invited' : r.participantType !== 'External',
@@ -433,13 +433,13 @@ function attendanceSummary(m, rows) {
     rate: expected ? Math.round((attended / expected) * 100) : 0,
   };
 }
-function attendanceSummaryText(s) {
+function summaryText(s) {
   return s.open
     ? [`實到人數：${s.attended}`, '開放非名單人員加入，不計算出席率']
     : [`應到人數：${s.expected}`, `實到人數：${s.attended}`, `出席率：${s.rate}%`];
 }
 function downloadExcel(rows, m) {
-  const summaryParts = attendanceSummaryText(attendanceSummary(m, rows));
+  const summaryParts = summaryText(attendanceSummary(m, rows));
   const headers = [
     '簽到時間',
     '簽退時間',
@@ -526,7 +526,7 @@ async function apiJson(url, options = {}) {
   requestOptions.headers = headers;
   const response = await fetch(url, requestOptions);
   // 登入 cookie 逾時或不存在：電腦版頁面直接回到登入頁（登入頁本身的帳密錯誤不在此處理）。
-  if (response.status === 401 && DESKTOP_PROTECTED_PAGES.has(currentPageName())) {
+  if (response.status === 401 && LOGIN_PAGES.has(currentPageName())) {
     clearDesktopSession();
     location.replace('./');
     throw new Error('登入已逾時，請重新登入。');
@@ -560,21 +560,17 @@ function currentUserID() {
   const u = getUser();
   return u.userID || u.operatorId || u.employeeNo || u.employeeId || u.sntopid || '';
 }
-function normalizeMeetingResult(value) {
+function toMeeting(value) {
   return value?.meeting || value;
 }
 
 // 90 分鐘閒置自動登出（所有登入後頁面共用）
 (function setupIdleLogout() {
-  if (
-    !DESKTOP_PROTECTED_PAGES.has(currentPageName()) ||
-    !sessionStorage.getItem('meetingLoginUser')
-  )
-    return;
+  if (!LOGIN_PAGES.has(currentPageName()) || !sessionStorage.getItem('meetingLoginUser')) return;
   const IDLE_MS = 90 * 60 * 1000;
   const WARNING_MS = 60 * 1000;
   let logoutTimer, warningTimer;
-  function clearLoginAndRedirect() {
+  function goLogin() {
     logoutDesktop();
   }
   function showIdleWarning() {
@@ -595,7 +591,7 @@ function normalizeMeetingResult(value) {
     clearTimeout(warningTimer);
     document.querySelector('#idleWarningOverlay')?.remove();
     warningTimer = setTimeout(showIdleWarning, IDLE_MS - WARNING_MS);
-    logoutTimer = setTimeout(clearLoginAndRedirect, IDLE_MS);
+    logoutTimer = setTimeout(goLogin, IDLE_MS);
   }
   ['click', 'keydown', 'input', 'change', 'touchstart', 'pointerdown'].forEach((eventName) =>
     document.addEventListener(eventName, resetIdleTimer, { passive: true }),

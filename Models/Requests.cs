@@ -2,7 +2,7 @@ namespace MeetingCheckin;
 
 public sealed record LoginRequest(string? Account, string? Password);
 
-public sealed record LiffMeetingAuthorizeRequest(string? Type, string? MeetingToken, string? IdToken);
+public sealed record LiffAuthRequest(string? Type, string? MeetingToken, string? IdToken);
 
 public sealed record LiffBindRequest(string? IdToken, string? Account, string? Password);
 
@@ -11,12 +11,12 @@ public sealed record DevMobileGuestSessionRequest(string? MeetingToken);
 
 public sealed record GuestProfileRequest(string? Organization, string? Name, string? Title);
 
-public sealed record MobileMeetingSessionPayload(
+public sealed record MobileSessionData(
     int ParticipantType,
     string EmployeeNo,
-    string ExternalName,
-    string ExternalOrganization,
-    string ExternalTitle,
+    string GuestName,
+    string GuestOrg,
+    string GuestTitle,
     string MeetingNo,
     string MeetingToken,
     long ExpiresUnixTime);
@@ -35,14 +35,14 @@ public sealed record AttendanceRowRequest(
 // 主持人開啟簽到單時看到的值，用來確認存檔前這一列沒有被別人改過。
 public sealed record AttendanceOriginal(string? In, string? Out, string? Operator, string? Note);
 
-public sealed record OwnAttendanceRequest(string? EmployeeNo);
+public sealed record SelfSignRequest(string? EmployeeNo);
 
-public sealed record ProxyAttendanceRequest(
+public sealed record ProxySignRequest(
     string Action,
     string ParticipantType,
     string? ParticipantEmployeeNo,
-    string? ExternalName,
-    string? ExternalOrganization,
+    string? GuestName,
+    string? GuestOrg,
     string? ProxyEmployeeNo,
     string? OperatedByEmployeeNo);
 
@@ -61,5 +61,5 @@ public sealed record MeetingSaveRequest(
     string? Note,
     string CurrentUserID,
     List<string>? ParticipantUserIDs,
-    bool AllowUnlistedParticipants,
+    bool AllowWalkIn,
     string? RowVersion);   // 編輯時送回開啟頁面當下的會議版本

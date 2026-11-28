@@ -1,11 +1,11 @@
 namespace MeetingCheckin;
 
-internal static class RequestContext
+internal static class RequestHelper
 {
     // 同一台院內電腦的 DNS 判定結果短暫快取，避免每個頁面 / API 請求都重做反向 DNS。
     internal static readonly ConcurrentDictionary<string, (bool IsHospitalComputer, string? ComputerName, DateTimeOffset ExpiresAt)> hospitalDeviceCache = new();
 
-    internal static string BuildMeetingLiffUrl(IConfiguration configuration, HttpRequest request, string token)
+    internal static string GetLiffUrl(IConfiguration configuration, HttpRequest request, string token)
     {
         var encodedToken = Uri.EscapeDataString(token.Trim());
         var liffId = configuration["LineLiff:LiffId"];
@@ -22,11 +22,11 @@ internal static class RequestContext
     internal const string EmployeeNoClaim = "EmployeeNo";
 
     // 目前登入者的員工編號（來自登入 cookie）。
-    internal static string CurrentEmployeeNo(ClaimsPrincipal principal) =>
+    internal static string GetUserId(ClaimsPrincipal principal) =>
         principal.FindFirstValue(EmployeeNoClaim)?.Trim() ?? "";
 
     // 本機直接連線：來源是本機，且沒有經過反向代理（ngrok 會加上 X-Forwarded-For，並保留原本的 Host）。
-    internal static bool IsDirectLocalRequest(HttpContext context)
+    internal static bool IsLocalRequest(HttpContext context)
     {
         var ip = context.Connection.RemoteIpAddress;
         if (ip is null) return false;
@@ -42,7 +42,7 @@ internal static class RequestContext
             || host is "127.0.0.1" or "::1" or "[::1]";
     }
 
-    internal static async Task<(bool IsHospitalComputer, string IpAddress, string? ComputerName, string DetectionSource)> DetectHospitalComputerAsync(
+    internal static async Task<(bool IsHospitalComputer, string IpAddress, string? ComputerName, string DetectionSource)> CheckHospitalPcAsync(
         HttpContext context,
         IWebHostEnvironment environment)
     {
@@ -60,7 +60,7 @@ internal static class RequestContext
             remoteIp = remoteIp.MapToIPv4();
 
         // 經由 ngrok 轉發的外部請求連線來源也是本機，因此要確認是本機直接連線，才視為院內電腦。
-        if (environment.IsDevelopment() && IsDirectLocalRequest(context))
+        if (environment.IsDevelopment() && IsLocalRequest(context))
             return (true, remoteIp.ToString(), Environment.MachineName?.Trim(), "developmentLocalhost");
 
         var ipAddress = remoteIp.ToString();
@@ -100,7 +100,7 @@ internal static class RequestContext
         return (computerNameMatched, ipAddress, computerName, "remoteConnection");
     }
 
-    private static readonly HashSet<string> ExternalStaticFiles = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> PublicFiles = new(StringComparer.OrdinalIgnoreCase)
     {
         "/liff-entry.html",
         "/mobile-checkin.html",
@@ -110,13 +110,13 @@ internal static class RequestContext
         "/js/mobile-checkin.js",
     };
 
-    internal static bool IsExternalAllowedPath(PathString path)
+    internal static bool IsPublicPath(PathString path)
     {
         var value = path.Value ?? "";
 
         // 外網只提供 LINE / LIFF 手機簽到流程與必要靜態資源。
         // 只開放手機簽到用到的頁面與檔案；電腦端頁面的 JS 不在清單內。
-        if (ExternalStaticFiles.Contains(value) || value.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase))
+        if (PublicFiles.Contains(value) || value.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase))
             return true;
 
         if (value.Equals("/api/liff/meeting/authorize", StringComparison.OrdinalIgnoreCase))
