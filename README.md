@@ -9,13 +9,13 @@
 > **English summary** — A check-in system that replaces paper sign-in sheets for hospital meetings, which I built independently during my IT internship at a hospital (July–August 2026), from requirements gathering to the user manual. It is published here as a de-identified version with the hospital's approval.
 > Hosts create meetings and project a QR Code from the desktop interface; attendees scan it with LINE (no app to install) to sign in and out, sign in on behalf of colleagues, or register as guests at open meetings, and hosts export the attendance sheet to Excel or PDF.
 > Built with ASP.NET Core 8 Minimal API, SQL Server and vanilla JavaScript, with LINE LIFF for mobile identity.
-> Serializable transactions and rowversion checks keep concurrent edits safe, a trigger-based audit trail records every attendance change, and the business rules are covered by xUnit tests that run in GitHub Actions.
+> Serializable transactions and rowversion checks keep concurrent edits safe, a trigger-based audit trail records every attendance change, and xUnit unit and integration tests (the latter running the whole app against SQL Server) run in GitHub Actions.
 
 **技術重點**
 - ASP.NET Core 8 Minimal API、SQL Server、原生 JavaScript，手機端以 LINE LIFF 驗證身分
 - 交易與並行控制：Serializable 交易產生編號、rowversion 防止同時編輯互相覆蓋，簽到紀錄由觸發程序保留修改歷程
 - 安全性：HttpOnly Cookie 驗證、最小權限資料庫帳號、參數化查詢、登入失敗鎖定
-- 業務規則獨立成可測試的類別，以 xUnit 單元測試與 GitHub Actions 持續驗證（含在 SQL Server 容器中執行建表腳本）
+- 測試：業務規則有單元測試；整合測試啟動整個系統、連接真的 SQL Server，驗證登入、建立會議、手機簽到、權限與修改歷程等完整流程；全部由 GitHub Actions 自動執行
 
 **電腦端（主持人）**
 
@@ -100,7 +100,7 @@ flowchart LR
 | 資料庫 | SQL Server 2022（兩個資料庫，含跨資料庫查詢） |
 | 前端 | 原生 HTML／CSS／JavaScript，無框架 |
 | 外部整合 | LINE LIFF（手機簽到身分）、QRCoder |
-| 測試與 CI | xUnit 單元測試；GitHub Actions 自動建置、測試，並在 SQL Server 容器中驗證建表與示範資料腳本 |
+| 測試與 CI | xUnit 單元測試；整合測試以 WebApplicationFactory 啟動整個系統並連接 SQL Server；GitHub Actions 自動建置、執行建表腳本與全部測試 |
 | 開發環境 | Docker Compose（SQL Server 與初始化腳本）、.NET user-secrets |
 
 **資料庫結構**（`db/01-schema.sql`）
@@ -210,6 +210,9 @@ dotnet run
 
 # 執行單元測試
 dotnet test tests/MeetingCheckin.Tests
+
+# 執行整合測試（會在資料庫中建立測試用的會議，之後可用 docker compose down -v 重建）
+RUN_INTEGRATION_TESTS=1 dotnet test tests/MeetingCheckin.IntegrationTests
 ```
 
 開啟 http://localhost:5080 ，使用示範帳號登入：
@@ -255,7 +258,9 @@ docker exec meeting-checkin-db /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U 
 ├── Mobile/MobileSession.cs    # 手機簽到憑證的簽發與檢查
 ├── Infrastructure/            # 資料庫輔助、死結重試、台北時間、請求來源判斷
 ├── Contracts/Requests.cs      # API 請求格式
-├── tests/MeetingCheckin.Tests # xUnit 單元測試
+├── tests/
+│   ├── MeetingCheckin.Tests             # 單元測試（業務規則）
+│   └── MeetingCheckin.IntegrationTests  # 整合測試（整個系統＋SQL Server）
 ├── .github/workflows/ci.yml   # GitHub Actions
 ├── .prettierrc                # 前端程式碼格式設定
 ├── docker-compose.yml         # SQL Server + 初始化
@@ -279,4 +284,4 @@ docker exec meeting-checkin-db /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U 
 - 簽到可設定提前開放，QR Code 可在會議前事先開啟、列印
 - 參與人員可跨單位搜尋姓名或員工編號
 - LINE 身分改由後端驗證 LIFF ID Token
-- 程式依功能模組化，加入單元測試與 CI
+- 程式依功能模組化，加入單元測試、整合測試與 CI

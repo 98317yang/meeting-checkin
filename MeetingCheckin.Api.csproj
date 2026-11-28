@@ -11,6 +11,7 @@
     <Content Remove="tests/**" />
     <None Remove="tests/**" />
     <InternalsVisibleTo Include="MeetingCheckin.Tests" />
+    <InternalsVisibleTo Include="MeetingCheckin.IntegrationTests" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />

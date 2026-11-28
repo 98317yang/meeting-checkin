@@ -19,7 +19,7 @@ jobs:
         run: dotnet test tests/MeetingCheckin.Tests -c Release --logger "console;verbosity=normal"
 
   database:
-    name: Database scripts
+    name: Database scripts and integration tests
     runs-on: ubuntu-latest
     env:
       SA_PASSWORD: Ci-Sa-Passw0rd!
@@ -63,3 +63,12 @@ jobs:
             echo "meeting_app was able to delete audit rows"; exit 1
           fi
           echo "Denied as expected."
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+      - name: Integration tests (whole app against this SQL Server)
+        env:
+          RUN_INTEGRATION_TESTS: "1"
+          ConnectionStrings__LineDb: Server=localhost,1433;Database=LineDB;User Id=meeting_app;Password=${{ env.APP_PASSWORD }};Encrypt=True;TrustServerCertificate=True
+          ConnectionStrings__LineMeetingDb: Server=localhost,1433;Database=LineMeeting;User Id=meeting_app;Password=${{ env.APP_PASSWORD }};Encrypt=True;TrustServerCertificate=True
+        run: dotnet test tests/MeetingCheckin.IntegrationTests --logger "console;verbosity=normal"

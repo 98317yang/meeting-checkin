@@ -46,7 +46,13 @@ internal static class RequestContext
         HttpContext context,
         IWebHostEnvironment environment)
     {
+        // 內網限制改由設定檔控制（Intranet:Enabled / AllowedIpPrefixes / ComputerNamePattern）。
+        // 未啟用時不限制來源，方便本機與展示環境使用；這個判斷放在最前面，
+        // 連線來源不明（例如在記憶體中執行的整合測試）時也一致適用。
+        var intranet = context.RequestServices.GetRequiredService<IConfiguration>().GetSection("Intranet");
         var remoteIp = context.Connection.RemoteIpAddress;
+        if (!intranet.GetValue<bool>("Enabled"))
+            return (true, remoteIp?.ToString() ?? "", null, "intranetCheckDisabled");
         if (remoteIp is null)
             return (false, "", null, "unknown");
 
@@ -58,12 +64,6 @@ internal static class RequestContext
             return (true, remoteIp.ToString(), Environment.MachineName?.Trim(), "developmentLocalhost");
 
         var ipAddress = remoteIp.ToString();
-
-        // 內網限制改由設定檔控制（Intranet:Enabled / AllowedIpPrefixes / ComputerNamePattern）。
-        // 未啟用時不限制來源，方便本機與展示環境使用。
-        var intranet = context.RequestServices.GetRequiredService<IConfiguration>().GetSection("Intranet");
-        if (!intranet.GetValue<bool>("Enabled"))
-            return (true, ipAddress, null, "intranetCheckDisabled");
 
         var allowedPrefixes = intranet.GetSection("AllowedIpPrefixes").Get<string[]>() ?? [];
         if (!allowedPrefixes.Any(prefix => !string.IsNullOrWhiteSpace(prefix)

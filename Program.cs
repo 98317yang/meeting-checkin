@@ -178,6 +178,8 @@ app.MapFallback(async context =>
         return;
     }
 
+    // SendFileAsync 不會自動帶 Content-Type，明確指定 HTML 與 UTF-8，避免中文亂碼。
+    context.Response.ContentType = "text/html; charset=utf-8";
     await context.Response.SendFileAsync(
         Path.Combine(app.Environment.WebRootPath, "index.html"));
 })
@@ -185,3 +187,6 @@ app.MapFallback(async context =>
 // 否則還沒登入的人連登入頁都看不到。這裡只回傳登入頁或 404 訊息，不含任何資料。
 .AllowAnonymous();
 app.Run();
+
+// 讓整合測試（WebApplicationFactory）可以啟動這個程式。
+public partial class Program;
